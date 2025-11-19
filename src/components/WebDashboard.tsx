@@ -5,9 +5,10 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Button } from "./ui/button";
-import { 
-  MessageSquare, 
-  TrendingUp, 
+import { Calendar } from "./ui/calendar";
+import {
+  MessageSquare,
+  TrendingUp,
   User,
   Settings,
   Sparkles,
@@ -23,7 +24,7 @@ import {
   Mail,
   Edit,
   Check,
-  X
+  X,
 } from "lucide-react";
 import bloomLogo from "figma:asset/73a8a80abf64277705c5d856c147464ec33b1a04.png";
 import {
@@ -33,7 +34,7 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip as RechartsTooltip,
-  ResponsiveContainer
+  ResponsiveContainer,
 } from "recharts";
 import { fakeBackend, type ScanRecord } from "../services/fakeBackend";
 
@@ -49,14 +50,14 @@ const progressData = [
   { date: "Week 1", acne: 65, hydration: 78, pores: 55, overall: 66 },
   { date: "Week 2", acne: 62, hydration: 80, pores: 58, overall: 68 },
   { date: "Week 3", acne: 58, hydration: 82, pores: 60, overall: 70 },
-  { date: "Week 4", acne: 55, hydration: 84, pores: 63, overall: 72 }
+  { date: "Week 4", acne: 55, hydration: 84, pores: 63, overall: 72 },
 ];
 
 const currentMetrics = [
   { name: "Acne", value: 55, change: -10, color: "#FF6B4A" },
   { name: "Hydration", value: 84, change: +6, color: "#10B981" },
   { name: "Pores", value: 63, change: +8, color: "#FFA94D" },
-  { name: "Redness", value: 70, change: +2, color: "#FF6B4A" }
+  { name: "Redness", value: 70, change: +2, color: "#FF6B4A" },
 ];
 
 // Mock chat messages
@@ -87,6 +88,7 @@ export function WebDashboard({ onViewResults, userInfo }: WebDashboardProps) {
 
   // 🔹 Scan history real (desde fakeBackend)
   const [scanHistory, setScanHistory] = useState<ScanRecord[]>([]);
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
 
   useEffect(() => {
     const loadScans = async () => {
@@ -100,6 +102,13 @@ export function WebDashboard({ onViewResults, userInfo }: WebDashboardProps) {
 
     loadScans();
   }, []);
+
+  const hasPhotoOnDate = (date: Date) => {
+    return scanHistory.some((scan) => {
+      const scanDate = new Date(scan.createdAt);
+      return scanDate.toDateString() === date.toDateString();
+    });
+  };
 
   // Profile state (coming from initial consultation when available)
   const initialName = userInfo?.fullName || "Bloom User";
@@ -431,7 +440,7 @@ export function WebDashboard({ onViewResults, userInfo }: WebDashboardProps) {
                   />
                   <Button
                     onClick={() => fileInputRef.current?.click()}
-                    className="h-14 w-14 bg.white hover:bg-[#F5F5F5] text-[#6B7280] hover:text-[#FF6B4A] rounded-xl border border-[#E5E5E5] font-['Manrope',sans-serif] flex items-center justify-center p-0"
+                    className="h-14 w-14 bg-white hover:bg-[#F5F5F5] text-[#6B7280] hover:text-[#FF6B4A] rounded-xl border border-[#E5E5E5] font-['Manrope',sans-serif] flex items-center justify-center p-0"
                   >
                     <Plus className="w-5 h-5" />
                   </Button>
@@ -570,7 +579,7 @@ export function WebDashboard({ onViewResults, userInfo }: WebDashboardProps) {
                 </div>
               </div>
 
-              {/* Photo History Section (dinámico con scanHistory) */}
+              {/* Photo History Section (calendar + real photos) */}
               <div className="bg-white rounded-2xl border border-[#E5E5E5] p-8 shadow-sm">
                 <div className="flex items-center gap-3 mb-6">
                   <CalendarIcon className="w-6 h-6 text-[#FF6B4A]" />
@@ -589,37 +598,34 @@ export function WebDashboard({ onViewResults, userInfo }: WebDashboardProps) {
                   </p>
                 ) : (
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {/* “Calendario” simple con días con scans */}
+                    {/* Calendar */}
                     <div className="flex flex-col">
                       <h4 className="text-[#6B7280] mb-4 font-['Manrope',sans-serif]">
-                        Scan Days
+                        Scan Calendar
                       </h4>
-                      <div className="flex flex-wrap gap-2 text-xs">
-                        {Array.from(
-                          new Map(
-                            scanHistory.map((scan) => {
-                              const date = new Date(scan.createdAt);
-                              const key = date.toDateString();
-                              return [key, date];
-                            })
-                          ).values()
-                        ).map((date) => (
-                          <span
-                            key={date.toISOString()}
-                            className="px-3 py-1 rounded-full bg-[#FFE6D7] text-[#FF6B4A]"
-                          >
-                            {date.toLocaleDateString(undefined, {
-                              month: "short",
-                              day: "numeric",
-                              year: "numeric",
-                            })}
-                          </span>
-                        ))}
+                      <div className="flex-1 flex items-center justify-center">
+                        <Calendar
+                          mode="single"
+                          selected={selectedDate}
+                          onSelect={setSelectedDate}
+                          className="rounded-xl border-0"
+                          modifiers={{
+                            hasPhoto: (date) => hasPhotoOnDate(date),
+                          }}
+                          modifiersStyles={{
+                            hasPhoto: {
+                              backgroundColor: "#FFF5F3",
+                              border: "2px solid #FF6B4A",
+                              fontWeight: "bold",
+                              color: "#FF6B4A",
+                            },
+                          }}
+                        />
                       </div>
-                      <p className="mt-3 text-[10px] text-slate-400 font-['Manrope',sans-serif]">
-                        Each pill represents a day with at least one skin
-                        analysis.
-                      </p>
+                      <div className="mt-4 flex items-center gap-2 text-sm text-[#6B7280] font-['Manrope',sans-serif]">
+                        <div className="w-4 h-4 rounded bg-[#FFF5F3] border-2 border-[#FF6B4A]" />
+                        <span>Days with scans</span>
+                      </div>
                     </div>
 
                     {/* Recent scans list */}
@@ -636,8 +642,16 @@ export function WebDashboard({ onViewResults, userInfo }: WebDashboardProps) {
                               className="flex items-center gap-4 p-4 bg-[#F5F5F5] rounded-xl hover:bg-[#FFE5DD] transition-colors cursor-pointer group"
                               onClick={onViewResults}
                             >
-                              <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-[#FF6B4A] to-[#FFA94D] flex items-center justify-center">
-                                <Camera className="w-7 h-7 text.white" />
+                              <div className="w-16 h-16 rounded-xl overflow-hidden bg-gradient-to-br from-[#FF6B4A] to-[#FFA94D] flex items-center justify-center">
+                                {scan.imageData ? (
+                                  <img
+                                    src={scan.imageData}
+                                    alt="Scan"
+                                    className="w-full h-full object-cover"
+                                  />
+                                ) : (
+                                  <Camera className="w-7 h-7 text-white" />
+                                )}
                               </div>
                               <div className="flex-1">
                                 <div className="text-[#18212D] font-['Manrope',sans-serif]">
