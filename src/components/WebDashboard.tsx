@@ -3,9 +3,12 @@
 // Main dashboard with AI chat, progress tracking, and recommendations
 // ============================================
 
-import { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Button } from "./ui/button";
 import { Calendar } from "./ui/calendar";
+import { ProgressRadar } from "./results/ProgressRadar";
+import { RadarOverview } from "./results/RadarOverview";
+import { skinMetrics, overallHealth } from "../constants/skinAnalysis";
 import {
   MessageSquare,
   TrendingUp,
@@ -41,6 +44,7 @@ import { fakeBackend, type ScanRecord } from "../services/fakeBackend";
 interface WebDashboardProps {
   onViewResults: () => void;
   userInfo?: Record<string, any>;
+  initialTab?: "chat" | "progress" | "recommendations" | "profile";
 }
 
 type TabType = "chat" | "progress" | "recommendations" | "profile";
@@ -79,8 +83,8 @@ const suggestedQuestions = [
   "How often should I exfoliate?",
 ];
 
-export function WebDashboard({ onViewResults, userInfo }: WebDashboardProps) {
-  const [activeTab, setActiveTab] = useState<TabType>("chat");
+export function WebDashboard({ onViewResults, userInfo, initialTab = "chat" }: WebDashboardProps) {
+  const [activeTab, setActiveTab] = useState<TabType>(initialTab);
   const [messages, setMessages] = useState(initialMessages);
   const [inputValue, setInputValue] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -248,44 +252,46 @@ export function WebDashboard({ onViewResults, userInfo }: WebDashboardProps) {
           </div>
         </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 p-4 space-y-2">
-          <button
-            onClick={() => setActiveTab("chat")}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-['Manrope',sans-serif] ${
-              activeTab === "chat"
-                ? "bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] text-white shadow-lg"
-                : "text-[#6B7280] hover:bg-[#F5F5F5]"
-            }`}
-          >
-            <MessageSquare className="w-5 h-5" />
-            <span>AI Chat</span>
-          </button>
+        {/* Navigation */}<nav className="flex-1 p-4 space-y-2">
+  {/* PROGRESS FIRST */}
+  <button
+    onClick={() => setActiveTab("progress")}
+    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-['Manrope',sans-serif] ${
+      activeTab === "progress"
+        ? "bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] text-white shadow-lg"
+        : "text-[#6B7280] hover:bg-[#F5F5F5]"
+    }`}
+  >
+    <TrendingUp className="w-5 h-5" />
+    <span>Progress</span>
+  </button>
 
-          <button
-            onClick={() => setActiveTab("progress")}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-['Manrope',sans-serif] ${
-              activeTab === "progress"
-                ? "bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] text-white shadow-lg"
-                : "text-[#6B7280] hover:bg-[#F5F5F5]"
-            }`}
-          >
-            <TrendingUp className="w-5 h-5" />
-            <span>Progress</span>
-          </button>
+  {/* CHAT SECOND */}
+  <button
+    onClick={() => setActiveTab("chat")}
+    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-['Manrope',sans-serif] ${
+      activeTab === "chat"
+        ? "bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] text-white shadow-lg"
+        : "text-[#6B7280] hover:bg-[#F5F5F5]"
+    }`}
+  >
+    <MessageSquare className="w-5 h-5" />
+    <span>AI Chat</span>
+  </button>
 
-          <button
-            onClick={() => setActiveTab("recommendations")}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-['Manrope',sans-serif] ${
-              activeTab === "recommendations"
-                ? "bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] text-white shadow-lg"
-                : "text-[#6B7280] hover:bg-[#F5F5F5]"
-            }`}
-          >
-            <Lightbulb className="w-5 h-5" />
-            <span>Recommendations</span>
-          </button>
-        </nav>
+  {/* RECOMMENDATIONS THIRD */}
+  <button
+    onClick={() => setActiveTab("recommendations")}
+    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-['Manrope',sans-serif] ${
+      activeTab === "recommendations"
+        ? "bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] text-white shadow-lg"
+        : "text-[#6B7280] hover:bg-[#F5F5F5]"
+    }`}
+  >
+    <Lightbulb className="w-5 h-5" />
+    <span>Recommendations</span>
+  </button>
+</nav>
 
         {/* User Profile */}
         <div className="p-4 border-t border-[#E5E5E5]">
@@ -456,235 +462,116 @@ export function WebDashboard({ onViewResults, userInfo }: WebDashboardProps) {
             </div>
           )}
 
-          {/* Progress Tab */}
-          {activeTab === "progress" && (
-            <div className="p-8 space-y-6">
-              {/* Multi-line Chart */}
-              <div className="bg-white rounded-2xl border border-[#E5E5E5] p-8 shadow-sm">
-                <h3
-                  className="text-[#18212D] mb-6 font-['Manrope',sans-serif]"
-                  style={{ fontSize: "20px", lineHeight: "28px" }}
-                >
-                  Metrics Over Time
-                </h3>
-                <ResponsiveContainer width="100%" height={400}>
-                  <LineChart data={progressData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E5E5" />
-                    <XAxis dataKey="date" stroke="#6B7280" />
-                    <YAxis stroke="#6B7280" />
-                    <RechartsTooltip />
-                    <Line
-                      type="monotone"
-                      dataKey="acne"
-                      stroke="#FF6B4A"
-                      strokeWidth={3}
-                      name="Acne"
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="hydration"
-                      stroke="#10B981"
-                      strokeWidth={3}
-                      name="Hydration"
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="pores"
-                      stroke="#FFA94D"
-                      strokeWidth={3}
-                      name="Pores"
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
+{/* Progress Tab */}
+{activeTab === "progress" && (
+  <div className="p-8 space-y-6">
+    {/* Key Metrics Overview (igual que en la pantalla de resultados) */}
+    <RadarOverview metrics={skinMetrics} overallHealth={overallHealth} />
 
-              {/* Improvement Summary */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-white rounded-2xl border border-[#E5E5E5] p-8 shadow-sm">
-                  <h3
-                    className="text-[#18212D] mb-6 font-['Manrope',sans-serif]"
-                    style={{ fontSize: "20px", lineHeight: "28px" }}
-                  >
-                    Your Improvements
-                  </h3>
-                  <div className="space-y-4">
-                    {currentMetrics.map((metric, idx) => (
-                      <div
-                        key={idx}
-                        className="flex items-center justify-between"
-                      >
-                        <span className="text-[#6B7280] font-['Manrope',sans-serif]">
-                          {metric.name}
-                        </span>
-                        <div className="flex items-center gap-3">
-                          <div className="w-32 h-2 bg-[#E5E5E5] rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D]"
-                              style={{ width: `${metric.value}%` }}
-                            />
-                          </div>
-                          <span
-                            className={`text-sm font-['Manrope',sans-serif] min-w-[60px] text-right ${
-                              metric.change >= 0
-                                ? "text-[#10B981]"
-                                : "text-[#FF6B4A]"
-                            }`}
-                          >
-                            {metric.change >= 0 ? "+" : ""}
-                            {metric.change} pts
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
 
-                <div className="bg-gradient-to-br from-white to-orange-50/30 rounded-2xl border border-[#E5E5E5] p-8 shadow-sm">
-                  <h3
-                    className="text-[#18212D] mb-4 font-['Manrope',sans-serif]"
-                    style={{ fontSize: "20px", lineHeight: "28px" }}
-                  >
-                    Keep It Up! 🎉
-                  </h3>
-                  <p className="text-[#6B7280] mb-6 font-['Manrope',sans-serif]">
-                    You've made amazing progress this month! Your overall skin
-                    health improved by 6 points.
-                  </p>
-                  <div className="space-y-3">
-                    <div className="flex items-start gap-3">
-                      <div className="w-6 h-6 rounded-full bg-[#10B981] flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <span className="text-white text-xs">✓</span>
-                      </div>
-                      <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
-                        Acne reduced by 10 points
-                      </div>
-                    </div>
-                    <div className="flex items-start gap-3">
-                      <div className="w-6 h-6 rounded-full bg-[#10B981] flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <span className="text-white text-xs">✓</span>
-                      </div>
-                      <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
-                        Hydration improved by 6 points
-                      </div>
-                    </div>
-                    <div className="flex items-start gap-3">
-                      <div className="w-6 h-6 rounded-full bg-[#10B981] flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <span className="text-white text-xs">✓</span>
-                      </div>
-                      <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
-                        Pore visibility decreased by 8 points
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+    {/* Photo History Section */}
+    <div className="bg-white rounded-2xl border border-[#E5E5E5] p-8 shadow-sm">
+      <div className="flex items-center gap-3 mb-6">
+        <CalendarIcon className="w-6 h-6 text-[#FF6B4A]" />
+        <h3
+          className="text-[#18212D] font-['Manrope',sans-serif]"
+          style={{ fontSize: "20px", lineHeight: "28px" }}
+        >
+          Photo History
+        </h3>
+      </div>
 
-              {/* Photo History Section (calendar + real photos) */}
-              <div className="bg-white rounded-2xl border border-[#E5E5E5] p-8 shadow-sm">
-                <div className="flex items-center gap-3 mb-6">
-                  <CalendarIcon className="w-6 h-6 text-[#FF6B4A]" />
-                  <h3
-                    className="text-[#18212D] font-['Manrope',sans-serif]"
-                    style={{ fontSize: "20px", lineHeight: "28px" }}
-                  >
-                    Photo History
-                  </h3>
-                </div>
-
-                {scanHistory.length === 0 ? (
-                  <p className="text-sm text-[#6B7280] font-['Manrope',sans-serif]">
-                    No scans yet. Once you run your first analysis, it will
-                    appear here.
-                  </p>
-                ) : (
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {/* Calendar */}
-                    <div className="flex flex-col">
-                      <h4 className="text-[#6B7280] mb-4 font-['Manrope',sans-serif]">
-                        Scan Calendar
-                      </h4>
-                      <div className="flex-1 flex items-center justify-center">
-                        <Calendar
-                          mode="single"
-                          selected={selectedDate}
-                          onSelect={setSelectedDate}
-                          className="rounded-xl border-0"
-                          modifiers={{
-                            hasPhoto: (date) => hasPhotoOnDate(date),
-                          }}
-                          modifiersStyles={{
-                            hasPhoto: {
-                              backgroundColor: "#FFF5F3",
-                              border: "2px solid #FF6B4A",
-                              fontWeight: "bold",
-                              color: "#FF6B4A",
-                            },
-                          }}
-                        />
-                      </div>
-                      <div className="mt-4 flex items-center gap-2 text-sm text-[#6B7280] font-['Manrope',sans-serif]">
-                        <div className="w-4 h-4 rounded bg-[#FFF5F3] border-2 border-[#FF6B4A]" />
-                        <span>Days with scans</span>
-                      </div>
-                    </div>
-
-                    {/* Recent scans list */}
-                    <div>
-                      <h4 className="text-[#6B7280] mb-4 font-['Manrope',sans-serif]">
-                        Recent scans
-                      </h4>
-                      <div className="space-y-4">
-                        {scanHistory.slice(0, 4).map((scan, index) => {
-                          const date = new Date(scan.createdAt);
-                          return (
-                            <div
-                              key={scan.id}
-                              className="flex items-center gap-4 p-4 bg-[#F5F5F5] rounded-xl hover:bg-[#FFE5DD] transition-colors cursor-pointer group"
-                              onClick={onViewResults}
-                            >
-                              <div className="w-16 h-16 rounded-xl overflow-hidden bg-gradient-to-br from-[#FF6B4A] to-[#FFA94D] flex items-center justify-center">
-                                {scan.imageData ? (
-                                  <img
-                                    src={scan.imageData}
-                                    alt="Scan"
-                                    className="w-full h-full object-cover"
-                                  />
-                                ) : (
-                                  <Camera className="w-7 h-7 text-white" />
-                                )}
-                              </div>
-                              <div className="flex-1">
-                                <div className="text-[#18212D] font-['Manrope',sans-serif]">
-                                  Skin analysis #{scanHistory.length - index}
-                                </div>
-                                <div className="text-sm text-[#6B7280] font-['Manrope',sans-serif]">
-                                  {date.toLocaleDateString("en-US", {
-                                    month: "short",
-                                    day: "numeric",
-                                    year: "numeric",
-                                  })}{" "}
-                                  ·{" "}
-                                  {scan.source === "camera"
-                                    ? "Camera"
-                                    : "Upload"}
-                                </div>
-                                <div className="text-xs text-[#10B981] mt-1 font-['Manrope',sans-serif]">
-                                  Score: coming soon
-                                </div>
-                              </div>
-                              <button className="opacity-0 group-hover:opacity-100 transition-opacity text-[#FF6B4A] hover:text-[#E74C3C]">
-                                <ChevronRight className="w-6 h-6" />
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
+      {scanHistory.length === 0 ? (
+        <p className="text-sm text-[#6B7280] font-['Manrope',sans-serif]">
+          No scans yet. Once you run your first analysis, it will appear here.
+        </p>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Calendar */}
+          <div className="flex flex-col">
+            <h4 className="text-[#6B7280] mb-4 font-['Manrope',sans-serif]">
+              Scan Calendar
+            </h4>
+            <div className="flex-1 flex items-center justify-center">
+              <Calendar
+                mode="single"
+                selected={selectedDate}
+                onSelect={setSelectedDate}
+                className="rounded-xl border-0"
+                modifiers={{
+                  hasPhoto: (date) => hasPhotoOnDate(date),
+                }}
+                modifiersStyles={{
+                  hasPhoto: {
+                    backgroundColor: "#FFF5F3",
+                    border: "2px solid #FF6B4A",
+                    fontWeight: "bold",
+                    color: "#FF6B4A",
+                  },
+                }}
+              />
             </div>
-          )}
+            <div className="mt-4 flex items-center gap-2 text-sm text-[#6B7280] font-['Manrope',sans-serif]">
+              <div className="w-4 h-4 rounded bg-[#FFF5F3] border-2 border-[#FF6B4A]" />
+              <span>Days with scans</span>
+            </div>
+          </div>
+
+          {/* Recent scans list */}
+          <div>
+            <h4 className="text-[#6B7280] mb-4 font-['Manrope',sans-serif]">
+              Recent scans
+            </h4>
+            <div className="space-y-4">
+              {scanHistory.slice(0, 4).map((scan, index) => {
+                const date = new Date(scan.createdAt);
+                return (
+                  <div
+                    key={scan.id}
+                    className="flex items-center gap-4 p-4 bg-[#F5F5F5] rounded-xl hover:bg-[#FFE5DD] transition-colors cursor-pointer group"
+                    onClick={onViewResults}
+                  >
+                    <div className="w-16 h-16 rounded-xl overflow-hidden bg-gradient-to-br from-[#FF6B4A] to-[#FFA94D] flex items-center justify-center">
+                      {scan.imageData ? (
+                        <img
+                          src={scan.imageData}
+                          alt="Scan"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <Camera className="w-7 h-7 text-white" />
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-[#18212D] font-['Manrope',sans-serif]">
+                        Skin analysis #{scanHistory.length - index}
+                      </div>
+                      <div className="text-sm text-[#6B7280] font-['Manrope',sans-serif]">
+                        {date.toLocaleDateString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                        })}{" "}
+                        ·{" "}
+                        {scan.source === "camera" ? "Camera" : "Upload"}
+                      </div>
+                      <div className="text-xs text-[#10B981] mt-1 font-['Manrope',sans-serif]">
+                        Score: coming soon
+                      </div>
+                    </div>
+                    <button className="opacity-0 group-hover:opacity-100 transition-opacity text-[#FF6B4A] hover:text-[#E74C3C]">
+                      <ChevronRight className="w-6 h-6" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  </div>
+)}
 
           {/* Recommendations Tab */}
           {activeTab === "recommendations" && (

@@ -10,9 +10,8 @@ import {
   Cloud,
   Activity,
   Sun,
-  Zap,
   User,
-  Sparkles
+  Sparkles,
 } from "lucide-react";
 import type { SkinMetric, OverallHealth, RecommendationCategory } from "../types";
 
@@ -28,7 +27,7 @@ export const skinMetrics: SkinMetric[] = [
     status: "Needs Attention",
     color: "#FF6B4A",
     gradient: "from-[#FFF5F3] to-[#FFE5DD]",
-    description: "Active breakouts and inflammation detected primarily in T-zone area. Comedonal and inflammatory acne present.",
+    description: "Active breakouts and inflammation detected primarily in T-zone area.",
     insight: "Moderate inflammatory response with some comedonal acne",
     biomarkers: [
       { label: "Number of acne regions", value: "12" },
@@ -44,23 +43,24 @@ export const skinMetrics: SkinMetric[] = [
       chin: 68
     }
   },
+
   { 
     id: "redness",
     name: "Redness",
-    icon: Zap,
+    icon: Activity,
     score: 68,
     strengthScore: 55,
     concernScore: 52,
     status: "Moderate",
     color: "#FF6B4A",
     gradient: "from-[#FFF5F3] to-[#FFE5DD]",
-    description: "Mild erythema present, possibly due to sensitivity or mild rosacea. Some capillary visibility.",
+    description: "Mild erythema present, possibly due to sensitivity or mild rosacea.",
     insight: "Increased vascularity in central facial areas",
     biomarkers: [
       { label: "Local score", value: "72" },
       { label: "Global score", value: "68" }
     ],
-    recommendation: "Gentle, fragrance-free products and azelaic acid for redness control",
+    recommendation: "Use fragrance-free products and azelaic acid to reduce redness",
     trend: [65, 66, 67, 68],
     zones: {
       forehead: 65,
@@ -70,6 +70,7 @@ export const skinMetrics: SkinMetric[] = [
       chin: 62
     }
   },
+
   { 
     id: "pores",
     name: "Pores",
@@ -80,13 +81,13 @@ export const skinMetrics: SkinMetric[] = [
     status: "Needs Attention",
     color: "#FF6B4A",
     gradient: "from-[#FFF5F3] to-[#FFE5DD]",
-    description: "Enlarged pores visible in T-zone due to increased sebum production and genetic factors.",
-    insight: "Moderate pore visibility with some congestion detected",
+    description: "Enlarged pores visible in T-zone with moderate congestion.",
+    insight: "Moderate pore visibility with some congestion",
     biomarkers: [
       { label: "Number of pores", value: "2,845" },
       { label: "Density", value: "High" }
     ],
-    recommendation: "Use niacinamide 10% serum and retinol for pore refinement",
+    recommendation: "Niacinamide 10% + retinol for pore refinement",
     trend: [52, 53, 54, 55],
     zones: {
       forehead: 58,
@@ -96,6 +97,7 @@ export const skinMetrics: SkinMetric[] = [
       chin: 55
     }
   },
+
   { 
     id: "hydration",
     name: "Hydration",
@@ -106,12 +108,12 @@ export const skinMetrics: SkinMetric[] = [
     status: "Good",
     color: "#FF6B4A",
     gradient: "from-[#FFF5F3] to-[#FFE5DD]",
-    description: "Skin maintains adequate moisture levels with some localized dry patches in cheek areas.",
-    insight: "Strong moisture barrier function in most facial zones",
+    description: "Good moisture levels with minor dry patches.",
+    insight: "Strong moisture barrier in most zones",
     biomarkers: [
       { label: "Hydration level", value: "78%" }
     ],
-    recommendation: "Continue with hyaluronic acid serum and ceramide-rich moisturizer",
+    recommendation: "Hyaluronic acid + ceramides",
     trend: [72, 75, 76, 78],
     zones: {
       forehead: 80,
@@ -121,6 +123,7 @@ export const skinMetrics: SkinMetric[] = [
       chin: 78
     }
   },
+
   { 
     id: "pigmentation",
     name: "Pigmentation",
@@ -131,13 +134,13 @@ export const skinMetrics: SkinMetric[] = [
     status: "Good",
     color: "#FF6B4A",
     gradient: "from-[#FFF5F3] to-[#FFE5DD]",
-    description: "Even skin tone with minor hyperpigmentation in sun-exposed areas. No significant melasma detected.",
-    insight: "Melanin distribution generally uniform with localized darkening",
+    description: "Even skin tone with minor dark spots.",
+    insight: "Localized hyperpigmentation in sun-exposed zones",
     biomarkers: [
-      { label: "Number of pigmentation spots", value: "18" },
+      { label: "Number of spots", value: "18" },
       { label: "Average size", value: "2.3 mm" }
     ],
-    recommendation: "Daily SPF 50+ and vitamin C serum for brightening",
+    recommendation: "SPF 50 daily + Vitamin C serum",
     trend: [68, 70, 71, 72],
     zones: {
       forehead: 75,
@@ -147,6 +150,7 @@ export const skinMetrics: SkinMetric[] = [
       chin: 75
     }
   },
+
   { 
     id: "translucency",
     name: "Translucency",
@@ -157,13 +161,13 @@ export const skinMetrics: SkinMetric[] = [
     status: "Excellent",
     color: "#FF6B4A",
     gradient: "from-[#FFF5F3] to-[#FFE5DD]",
-    description: "High skin translucency indicating healthy, youthful skin structure with good collagen density.",
-    insight: "Excellent light scattering properties and dermal density",
+    description: "High translucency indicates strong collagen density.",
+    insight: "Excellent dermal structure and light scattering properties",
     biomarkers: [
       { label: "Translucency index", value: "82%" },
       { label: "Collagen density", value: "High" }
     ],
-    recommendation: "Maintain with vitamin C and peptide serums for collagen support",
+    recommendation: "Maintain with Vitamin C and peptides",
     trend: [78, 79, 81, 82],
     zones: {
       forehead: 85,
@@ -173,8 +177,9 @@ export const skinMetrics: SkinMetric[] = [
       chin: 84
     }
   },
+
   { 
-    id: "lines",
+    id: "lines_wrinkles",
     name: "Lines & Wrinkles",
     icon: Activity,
     score: 75,
@@ -183,13 +188,13 @@ export const skinMetrics: SkinMetric[] = [
     status: "Good",
     color: "#FF6B4A",
     gradient: "from-[#FFF5F3] to-[#FFE5DD]",
-    description: "Minimal fine lines with some expression lines beginning to form around eyes and forehead.",
-    insight: "Early signs of photoaging with maintained elasticity",
+    description: "Mild expression lines around forehead and eyes.",
+    insight: "Early signs of loss of elasticity",
     biomarkers: [
-      { label: "Sagging score", value: "25" },
-      { label: "Jowls grade", value: "Low" }
+      { label: "Fine line depth", value: "Low" },
+      { label: "Elasticity loss", value: "Mild" }
     ],
-    recommendation: "Retinol 0.5% at night and peptide eye cream",
+    recommendation: "Retinol + peptide cream",
     trend: [73, 74, 74, 75],
     zones: {
       forehead: 72,
@@ -197,32 +202,6 @@ export const skinMetrics: SkinMetric[] = [
       rightCheek: 77,
       nose: 80,
       chin: 76
-    }
-  },
-  { 
-    id: "skintype",
-    name: "Skin Type",
-    icon: User,
-    score: 70,
-    strengthScore: 68,
-    concernScore: 42,
-    status: "Good",
-    color: "#FF6B4A",
-    gradient: "from-[#FFF5F3] to-[#FFE5DD]",
-    description: "Combination skin with oily T-zone and normal to dry U-zone. Balanced sebum distribution across different facial areas.",
-    insight: "Well-maintained surface topology with minor irregularities",
-    biomarkers: [
-      { label: "U-zone skin type", value: "Normal-Dry" },
-      { label: "T-zone skin type", value: "Oily" }
-    ],
-    recommendation: "Weekly chemical exfoliation with AHA/BHA combination",
-    trend: [67, 68, 69, 70],
-    zones: {
-      forehead: 72,
-      leftCheek: 68,
-      rightCheek: 70,
-      nose: 65,
-      chin: 73
     }
   }
 ];

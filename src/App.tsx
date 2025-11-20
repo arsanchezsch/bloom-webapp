@@ -32,6 +32,9 @@ export default function App() {
   const [consultationData, setConsultationData] =
     useState<ConsultationData | null>(null);
 
+  // Añade estado para guardar el tab inicial al ir al dashboard
+  const [initialDashboardTab, setInitialDashboardTab] = useState<"chat" | "progress" | "recommendations" | "profile">("chat");
+
   // 🧍 Guardamos la consulta en el backend falso
   const handleConsultationComplete = async (data: ConsultationData) => {
     const saved = await fakeBackend.saveConsultation(data);
@@ -57,8 +60,9 @@ export default function App() {
     setCurrentScreen("web-results");
   };
 
-  const handleViewDashboard = () => {
+  const handleViewDashboard = (initialTab = "chat") => {
     setCurrentScreen("web-dashboard");
+    setInitialDashboardTab(initialTab);
   };
 
   const handleViewResults = () => {
@@ -77,7 +81,7 @@ export default function App() {
       return (
         <WebResultsScreen
           capturedImage={capturedImage}
-          onViewDashboard={handleViewDashboard}
+          onViewDashboard={() => handleViewDashboard("progress")}
         />
       );
 
@@ -86,6 +90,7 @@ export default function App() {
         <WebDashboard
           onViewResults={handleViewResults}
           userInfo={consultationData ?? undefined}
+          initialTab={initialDashboardTab}
         />
       );
 
