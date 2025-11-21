@@ -58,17 +58,24 @@ export default function App() {
     source: "camera" | "upload" = "upload"
   ) => {
     setCapturedImage(imageData);
-
+  
     const consultationId = (consultationData as any)?.id;
-
-    await fakeBackend.saveScan({
-      imageData,
-      source,
-      consultationId,
-    });
-
-    setCurrentScreen("web-results");
-  };
+  
+    try {
+      await fakeBackend.saveScan({
+        imageData,
+        source,
+        consultationId,
+      });
+    } catch (error) {
+      // Si algo falla guardando (por ej. localStorage en móvil),
+      // no bloqueamos el flujo. Solo lo ignoramos silenciosamente.
+      console.error("Error saving scan in fakeBackend:", error);
+    } finally {
+      // Pase lo que pase, seguimos al resultado
+      setCurrentScreen("web-results");
+    }
+  };  
 
   const handleViewDashboard = (initialTab = "chat") => {
     setCurrentScreen("web-dashboard");
