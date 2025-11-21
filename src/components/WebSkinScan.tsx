@@ -15,7 +15,7 @@ export function WebSkinScan({ onComplete, forceCameraMode = false }: WebSkinScan
   const videoRef = useRef<HTMLVideoElement>(null);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [showQRModal, setShowQRModal] = useState(false);
-  
+
     // Si venimos desde /capture, abrimos la cámara automáticamente
     useEffect(() => {
       if (forceCameraMode) {
@@ -378,7 +378,15 @@ export function WebSkinScan({ onComplete, forceCameraMode = false }: WebSkinScan
       </main>
       {showQRModal && (
   <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-    <div className="bg-white rounded-3xl border border-[#E5E5E5] p-6 md:p-8 max-w-sm w-full text-center shadow-xl">
+    <div className="relative bg-white rounded-3xl border border-[#E5E5E5] p-6 md:p-8 pt-10 md:pt-12 max-w-sm w-full text-center shadow-xl">
+      {/* Botón X arriba a la derecha */}
+      <button
+        onClick={() => setShowQRModal(false)}
+        className="absolute top-4 right-4 text-[#9CA3AF] hover:text-[#111827] text-xl leading-none"
+        aria-label="Close QR modal"
+      >
+        ×
+      </button>
 
       <h2
         className="text-[#18212D] font-['Manrope',sans-serif] mb-2"
@@ -393,7 +401,7 @@ export function WebSkinScan({ onComplete, forceCameraMode = false }: WebSkinScan
 
       {/* QR CODE */}
       {(() => {
-        const qrLink = "https://bloom-webapp-swart.vercel.app/capture";
+        const qrLink = "https://bapp-swart.vercel.app/capture";
         return (
           <img
             src={`https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(
