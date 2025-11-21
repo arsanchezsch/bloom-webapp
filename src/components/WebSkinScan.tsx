@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Button } from "./ui/button";
 import { Camera, Upload, QrCode, Sparkles, CheckCircle2 } from "lucide-react";
 import bloomLogo from "figma:asset/73a8a80abf64277705c5d856c147464ec33b1a04.png";
@@ -7,13 +7,22 @@ interface WebSkinScanProps {
   onComplete: (imageData: string, source: "camera" | "upload") => void;
 }
 
-export function WebSkinScan({ onComplete }: WebSkinScanProps) {
+export function WebSkinScan({ onComplete, forceCameraMode = false }: WebSkinScanProps & { forceCameraMode?: boolean }) {
   const [selectedOption, setSelectedOption] = useState<"camera" | "upload" | "qr" | null>(null);
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [showQRModal, setShowQRModal] = useState(false);
+  
+    // Si venimos desde /capture, abrimos la cámara automáticamente
+    useEffect(() => {
+      if (forceCameraMode) {
+        handleTakePhoto();
+      }
+    }, [forceCameraMode]);
+  
 
   const handleTakePhoto = async () => {
     setSelectedOption("camera");
@@ -107,10 +116,14 @@ export function WebSkinScan({ onComplete }: WebSkinScanProps) {
   };
 
   const handleScanQR = () => {
+    // Por si la cámara estaba activa
+    stopCamera();
+    setUploadedImage(null);
+    setIsScanning(false);
+  
     setSelectedOption("qr");
-    alert("QR scanning feature - scan the QR code from your mobile device to upload a photo");
-    setSelectedOption(null);
-  };
+    setShowQRModal(true);
+  };  
 
   const startAnalysis = (imageData: string) => {
     setIsScanning(true);
@@ -363,7 +376,44 @@ export function WebSkinScan({ onComplete }: WebSkinScanProps) {
           </div>
         </div>
       </main>
+      {showQRModal && (
+  <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+    <div className="bg-white rounded-3xl border border-[#E5E5E5] p-6 md:p-8 max-w-sm w-full text-center shadow-xl">
 
+      <h2
+        className="text-[#18212D] font-['Manrope',sans-serif] mb-2"
+        style={{ fontSize: "22px", lineHeight: "30px" }}
+      >
+        Scan this QR code on your phone
+      </h2>
+
+      <p className="text-[#6B7280] mb-4 font-['Manrope',sans-serif]">
+        Open your camera, scan it, and continue the analysis on your mobile.
+      </p>
+
+      {/* QR CODE */}
+      {(() => {
+        const qrLink = "https://bloom-webapp-swart.vercel.app/capture";
+        return (
+          <img
+            src={`https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(
+              qrLink
+            )}`}
+            alt="Bloom QR code"
+            className="mx-auto rounded-2xl mb-4"
+          />
+        );
+      })()}
+
+      <button
+        onClick={() => setShowQRModal(false)}
+        className="mt-3 w-full h-11 px-6 bg-[#18212D] hover:bg-[#111827] text-white rounded-full font-['Manrope',sans-serif]"
+      >
+        Close
+      </button>
+    </div>
+  </div>
+)}
       {/* Hidden file input */}
       <input
         ref={fileInputRef}

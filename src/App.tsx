@@ -25,15 +25,25 @@ export interface ConsultationData {
 }
 
 export default function App() {
-  const [currentScreen, setCurrentScreen] =
-    useState<Screen>("web-consultation");
+  // Detectar si estamos en la ruta /capture (para el flujo QR móvil)
+  const isCaptureRoute =
+    typeof window !== "undefined" && window.location.pathname === "/capture";
 
+  // Si es /capture empezamos directamente en el escáner,
+  // si no, empezamos en la consulta normal
+  const initialScreen: Screen = isCaptureRoute
+    ? "web-scan"
+    : "web-consultation";
+
+  const [currentScreen, setCurrentScreen] = useState<Screen>(initialScreen);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [consultationData, setConsultationData] =
     useState<ConsultationData | null>(null);
 
-  // Añade estado para guardar el tab inicial al ir al dashboard
-  const [initialDashboardTab, setInitialDashboardTab] = useState<"chat" | "progress" | "recommendations" | "profile">("chat");
+  // Tab inicial del dashboard
+  const [initialDashboardTab, setInitialDashboardTab] = useState<
+    "chat" | "progress" | "recommendations" | "profile"
+  >("chat");
 
   // 🧍 Guardamos la consulta en el backend falso
   const handleConsultationComplete = async (data: ConsultationData) => {
@@ -72,15 +82,24 @@ export default function App() {
   // Render según pantalla
   switch (currentScreen) {
     case "web-consultation":
-      return <PersonalConsultation onComplete={handleConsultationComplete} />;
+      return (
+        <PersonalConsultation onComplete={handleConsultationComplete} />
+      );
 
     case "web-scan":
-      return <WebSkinScan onComplete={handleScanComplete} />;
+      return (
+        <WebSkinScan
+          onComplete={handleScanComplete}
+          // 👇 Si venimos de /capture (QR), abrimos la cámara directamente
+          forceCameraMode={isCaptureRoute}
+        />
+      );
 
     case "web-results":
       return (
         <WebResultsScreen
           capturedImage={capturedImage}
+          // Al ir al dashboard desde resultados, abrimos directamente la pestaña de progreso
           onViewDashboard={() => handleViewDashboard("progress")}
         />
       );
