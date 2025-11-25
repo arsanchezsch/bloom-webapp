@@ -279,12 +279,6 @@ if (isHautLoading) {
                   <Calendar className="w-4 h-4" />
                   Analyzed on {formatDate(new Date())}
                 </p>
-                {hautStatus === "completed" && (
-                  <p className="text-[#059669] text-xs mt-1 font-['Manrope',sans-serif]">
-                    Powered by Haut.AI · Metrics generated from your latest
-                    selfie.
-                  </p>
-                )}
               </div>
               <img src={bloomLogo} alt="Bloom" className="h-12" />
             </div>
@@ -401,18 +395,6 @@ if (isHautLoading) {
               >
                 Go to Dashboard
               </Button>
-            </div>
-          )}
-
-          {/* Debug block: raw Haut.AI results (for development only) */}
-          {hautResult && (
-            <div className="mt-10 mb-6">
-              <h3 className="text-[#4B5563] mb-2 text-sm font-['Manrope',sans-serif]">
-                Debug · Raw Haut.AI results (development only)
-              </h3>
-              <pre className="text-xs bg-[#111827] text-[#F9FAFB] rounded-2xl p-4 overflow-x-auto">
-                {JSON.stringify(hautResult.rawResults, null, 2)}
-              </pre>
             </div>
           )}
         </div>
