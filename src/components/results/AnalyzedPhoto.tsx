@@ -9,14 +9,18 @@ import { formatDate, formatTime } from "../../utils/helpers";
 
 interface AnalyzedPhotoProps {
   imageUrl: string;
+  // Foto alineada de Haut (mismo zoom que Lines en el modal)
+  hautFaceImageUrl?: string;
+  // Máscara real de líneas de Haut (aligned_face_lines.svg)
+  hautLinesMaskUrl?: string;
 }
 
-type MetricHighlight = 
-  | "none" 
-  | "acne" 
-  | "pores" 
-  | "pigmentation" 
-  | "redness" 
+type MetricHighlight =
+  | "none"
+  | "acne"
+  | "pores"
+  | "pigmentation"
+  | "redness"
   | "hydration"
   | "translucency"
   | "lines";
@@ -29,75 +33,94 @@ const METRIC_OPTIONS = [
   { value: "redness" as const, label: "Redness" },
   { value: "hydration" as const, label: "Hydration" },
   { value: "translucency" as const, label: "Translucency" },
-  { value: "lines" as const, label: "Lines" }
+  { value: "lines" as const, label: "Lines" },
 ];
 
-export function AnalyzedPhoto({ imageUrl }: AnalyzedPhotoProps) {
+export function AnalyzedPhoto({
+  imageUrl,
+  hautFaceImageUrl,
+  hautLinesMaskUrl,
+}: AnalyzedPhotoProps) {
   const now = new Date();
   const [selectedMetric, setSelectedMetric] = useState<MetricHighlight>("none");
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
+  const isLinesMetric = selectedMetric === "lines";
+
+  // ⚠️ Igual que en el modal: siempre usamos la foto alineada si existe
+  const basePhoto = hautFaceImageUrl || imageUrl;
+
   const getHighlightColor = (metric: MetricHighlight): string => {
     switch (metric) {
-      case "acne": return "rgba(255, 107, 74, 0.35)";
-      case "pores": return "rgba(255, 169, 77, 0.35)";
-      case "pigmentation": return "rgba(255, 193, 7, 0.35)";
-      case "redness": return "rgba(239, 68, 68, 0.35)";
-      case "hydration": return "rgba(59, 130, 246, 0.35)";
-      case "translucency": return "rgba(168, 85, 247, 0.35)";
-      case "lines": return "rgba(107, 114, 128, 0.35)";
-      default: return "transparent";
+      case "acne":
+        return "rgba(255, 107, 74, 0.35)";
+      case "pores":
+        return "rgba(255, 169, 77, 0.35)";
+      case "pigmentation":
+        return "rgba(255, 193, 7, 0.35)";
+      case "redness":
+        return "rgba(239, 68, 68, 0.35)";
+      case "hydration":
+        return "rgba(59, 130, 246, 0.35)";
+      case "translucency":
+        return "rgba(168, 85, 247, 0.35)";
+      case "lines":
+        return "rgba(107, 114, 128, 0.35)";
+      default:
+        return "transparent";
     }
   };
 
   const renderHighlightAreas = () => {
     if (selectedMetric === "none") return null;
 
-    // Define different face area overlays for each metric
+    // Si estamos en Lines y tenemos máscara real, no mostramos las áreas fake
+    if (selectedMetric === "lines" && hautLinesMaskUrl) return null;
+
     const overlays = {
-      "acne": [
+      acne: [
         { top: "25%", left: "30%", width: "15%", height: "8%" }, // Forehead
         { top: "40%", left: "20%", width: "12%", height: "10%" }, // Left cheek
         { top: "42%", left: "68%", width: "10%", height: "8%" }, // Right cheek
         { top: "55%", left: "42%", width: "8%", height: "6%" }, // Nose
       ],
-      "pores": [
+      pores: [
         { top: "45%", left: "40%", width: "20%", height: "15%" }, // T-zone center
         { top: "38%", left: "25%", width: "15%", height: "12%" }, // Left T-zone
         { top: "38%", left: "60%", width: "15%", height: "12%" }, // Right T-zone
       ],
-      "pigmentation": [
+      pigmentation: [
         { top: "40%", left: "22%", width: "18%", height: "20%" }, // Left cheek area
         { top: "40%", left: "60%", width: "18%", height: "20%" }, // Right cheek area
         { top: "25%", left: "35%", width: "30%", height: "10%" }, // Forehead
       ],
-      "redness": [
+      redness: [
         { top: "42%", left: "24%", width: "16%", height: "18%" }, // Left cheek
         { top: "42%", left: "60%", width: "16%", height: "18%" }, // Right cheek
         { top: "48%", left: "42%", width: "16%", height: "12%" }, // Nose area
       ],
-      "hydration": [
+      hydration: [
         { top: "40%", left: "22%", width: "18%", height: "20%" }, // Left cheek area
         { top: "40%", left: "60%", width: "18%", height: "20%" }, // Right cheek area
         { top: "25%", left: "35%", width: "30%", height: "10%" }, // Forehead
       ],
-      "translucency": [
+      translucency: [
         { top: "22%", left: "35%", width: "30%", height: "5%" }, // Forehead lines
         { top: "52%", left: "35%", width: "12%", height: "8%" }, // Nasolabial left
         { top: "52%", left: "53%", width: "12%", height: "8%" }, // Nasolabial right
         { top: "36%", left: "32%", width: "8%", height: "4%" }, // Crow's feet left
         { top: "36%", left: "60%", width: "8%", height: "4%" }, // Crow's feet right
       ],
-      "lines": [
+      lines: [
         { top: "22%", left: "35%", width: "30%", height: "5%" }, // Forehead lines
         { top: "52%", left: "35%", width: "12%", height: "8%" }, // Nasolabial left
         { top: "52%", left: "53%", width: "12%", height: "8%" }, // Nasolabial right
         { top: "36%", left: "32%", width: "8%", height: "4%" }, // Crow's feet left
         { top: "36%", left: "60%", width: "8%", height: "4%" }, // Crow's feet right
-      ]
+      ],
     };
 
-    const areas = overlays[selectedMetric] || [];
+    const areas = overlays[selectedMetric as Exclude<MetricHighlight, "none">] || [];
     const color = getHighlightColor(selectedMetric);
 
     return areas.map((area, idx) => (
@@ -110,27 +133,29 @@ export function AnalyzedPhoto({ imageUrl }: AnalyzedPhotoProps) {
           width: area.width,
           height: area.height,
           backgroundColor: color,
-          border: `2px solid ${color.replace('0.35', '0.8')}`,
+          border: `2px solid ${color.replace("0.35", "0.8")}`,
           boxShadow: `0 0 20px ${color}`,
-          pointerEvents: "none"
+          pointerEvents: "none",
         }}
       />
     ));
   };
 
-  const selectedOption = METRIC_OPTIONS.find(opt => opt.value === selectedMetric);
+  const selectedOption = METRIC_OPTIONS.find(
+    (opt) => opt.value === selectedMetric
+  );
 
   return (
     <div className="bg-white rounded-3xl border border-[#E5E5E5] p-6 shadow-sm">
       {/* Header with Dropdown */}
       <div className="flex items-center justify-between mb-4">
-        <h3 
-          className="text-[#18212D] font-['Manrope',sans-serif]" 
-          style={{ fontSize: '20px', lineHeight: '28px' }}
+        <h3
+          className="text-[#18212D] font-['Manrope',sans-serif]"
+          style={{ fontSize: "20px", lineHeight: "28px" }}
         >
           Analyzed Photo
         </h3>
-        
+
         {/* Metric Selector Dropdown */}
         <div className="relative">
           <button
@@ -140,8 +165,10 @@ export function AnalyzedPhoto({ imageUrl }: AnalyzedPhotoProps) {
             <span className="text-[#FF6B4A]">
               Highlighting: {selectedOption?.label}
             </span>
-            <ChevronDown 
-              className={`w-4 h-4 text-[#FF6B4A] transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} 
+            <ChevronDown
+              className={`w-4 h-4 text-[#FF6B4A] transition-transform ${
+                isDropdownOpen ? "rotate-180" : ""
+              }`}
             />
           </button>
 
@@ -156,9 +183,9 @@ export function AnalyzedPhoto({ imageUrl }: AnalyzedPhotoProps) {
                     setIsDropdownOpen(false);
                   }}
                   className={`w-full text-left px-4 py-3 hover:bg-[#FFF5F3] transition-colors font-['Manrope',sans-serif] text-sm ${
-                    selectedMetric === option.value 
-                      ? 'bg-[#FFF5F3] text-[#FF6B4A]' 
-                      : 'text-[#18212D]'
+                    selectedMetric === option.value
+                      ? "bg-[#FFF5F3] text-[#FF6B4A]"
+                      : "text-[#18212D]"
                   }`}
                 >
                   {option.label}
@@ -168,19 +195,36 @@ export function AnalyzedPhoto({ imageUrl }: AnalyzedPhotoProps) {
           )}
         </div>
       </div>
-      
+
       {/* Photo Container with Highlights */}
-      <div className="relative aspect-square rounded-2xl overflow-hidden border-2 border-[#E5E5E5] bg-[#F5F5F5]">
-        <img 
-          src={imageUrl} 
-          alt="Your analyzed photo" 
-          className="w-full h-full object-cover" 
+      <div
+        className="relative rounded-2xl overflow-hidden border-2 border-[#E5E5E5] bg-[#F5F5F5]"
+        style={{ aspectRatio: "4 / 5" }} // mismo ratio que el modal
+      >
+        {/* Foto base: SIEMPRE la misma (alineada si existe) */}
+        <img
+          src={basePhoto}
+          alt="Your analyzed photo"
+          className="w-full h-full object-contain"
         />
-        
-        {/* Highlight Overlays */}
+
+        {/* Lines: máscara real de Haut, mismo encuadre que el modal */}
+        {isLinesMetric && hautLinesMaskUrl && (
+          <img
+            src={hautLinesMaskUrl}
+            alt="Lines overlay"
+            className="absolute inset-0 w-full h-full object-contain pointer-events-none mix-blend-screen opacity-35"
+            style={{
+              filter:
+                "brightness(0.9) contrast(1.15) saturate(1.2) blur(0.5px)",
+            }}
+          />
+        )}
+
+        {/* Overlays fake para el resto de métricas */}
         {renderHighlightAreas()}
       </div>
-      
+
       {/* Timestamp */}
       <div className="mt-4 flex items-center justify-between">
         <p className="text-sm text-[#6B7280] font-['Manrope',sans-serif]">
@@ -195,7 +239,8 @@ export function AnalyzedPhoto({ imageUrl }: AnalyzedPhotoProps) {
       {selectedMetric !== "none" && (
         <div className="mt-3 p-3 bg-[#FFF5F3] rounded-xl">
           <p className="text-xs text-[#FF6B4A] font-['Manrope',sans-serif]">
-            ✨ Highlighted areas show detected {selectedOption?.label.toLowerCase()} on your face
+            ✨ Highlighted areas show detected{" "}
+            {selectedOption?.label.toLowerCase()} on your face
           </p>
         </div>
       )}

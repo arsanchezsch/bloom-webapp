@@ -1,14 +1,20 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "./ui/button";
-import { Camera, Upload, QrCode, Sparkles, CheckCircle2 } from "lucide-react";
+import { Camera, Upload, QrCode, CheckCircle2 } from "lucide-react";
 import bloomLogo from "figma:asset/73a8a80abf64277705c5d856c147464ec33b1a04.png";
+import { AnalyzingScreen } from "./AnalyzingScreen";
 
 interface WebSkinScanProps {
   onComplete: (imageData: string, source: "camera" | "upload") => void;
 }
 
-export function WebSkinScan({ onComplete, forceCameraMode = false }: WebSkinScanProps & { forceCameraMode?: boolean }) {
-  const [selectedOption, setSelectedOption] = useState<"camera" | "upload" | "qr" | null>(null);
+export function WebSkinScan({
+  onComplete,
+  forceCameraMode = false,
+}: WebSkinScanProps & { forceCameraMode?: boolean }) {
+  const [selectedOption, setSelectedOption] = useState<
+    "camera" | "upload" | "qr" | null
+  >(null);
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -16,55 +22,64 @@ export function WebSkinScan({ onComplete, forceCameraMode = false }: WebSkinScan
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [showQRModal, setShowQRModal] = useState(false);
 
-    // Si venimos desde /capture, abrimos la cámara automáticamente
-    useEffect(() => {
-      if (forceCameraMode) {
-        handleTakePhoto();
-      }
-    }, [forceCameraMode]);
-  
+  // Si venimos desde /capture, abrimos la cámara automáticamente
+  useEffect(() => {
+    if (forceCameraMode) {
+      handleTakePhoto();
+    }
+  }, [forceCameraMode]);
 
   const handleTakePhoto = async () => {
     setSelectedOption("camera");
     try {
-      // Check if getUserMedia is supported
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        alert("Camera access is not supported in your browser. Please try uploading a photo instead.");
+        alert(
+          "Camera access is not supported in your browser. Please try uploading a photo instead."
+        );
         setSelectedOption(null);
         return;
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { 
+        video: {
           facingMode: "user",
           width: { ideal: 1280 },
-          height: { ideal: 720 }
+          height: { ideal: 720 },
         },
       });
-      
+
       setCameraStream(stream);
-      
+
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        // Wait for video to be ready
         await videoRef.current.play();
       }
     } catch (error: any) {
-      // Silently handle the error without console logging
       let errorMessage = "Could not access camera. ";
-      
-      if (error.name === "NotAllowedError" || error.name === "PermissionDeniedError") {
-        errorMessage += "Please allow camera permissions in your browser settings and try again.";
-      } else if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError") {
-        errorMessage += "No camera found on your device. Please try uploading a photo instead.";
-      } else if (error.name === "NotReadableError" || error.name === "TrackStartError") {
+
+      if (
+        error.name === "NotAllowedError" ||
+        error.name === "PermissionDeniedError"
+      ) {
+        errorMessage +=
+          "Please allow camera permissions in your browser settings and try again.";
+      } else if (
+        error.name === "NotFoundError" ||
+        error.name === "DevicesNotFoundError"
+      ) {
+        errorMessage +=
+          "No camera found on your device. Please try uploading a photo instead.";
+      } else if (
+        error.name === "NotReadableError" ||
+        error.name === "TrackStartError"
+      ) {
         errorMessage += "Camera is already in use by another application.";
       } else if (error.name === "OverconstrainedError") {
         errorMessage += "Camera doesn't meet the required specifications.";
       } else {
         errorMessage += "Please check your camera and browser settings.";
       }
-      
+
       alert(errorMessage);
       setSelectedOption(null);
     }
@@ -105,7 +120,6 @@ export function WebSkinScan({ onComplete, forceCameraMode = false }: WebSkinScan
       reader.onloadend = () => {
         const imageData = reader.result as string;
         setUploadedImage(imageData);
-        // Start analysis with the image data directly
         setIsScanning(true);
         setTimeout(() => {
           onComplete(imageData, "upload");
@@ -116,14 +130,13 @@ export function WebSkinScan({ onComplete, forceCameraMode = false }: WebSkinScan
   };
 
   const handleScanQR = () => {
-    // Por si la cámara estaba activa
     stopCamera();
     setUploadedImage(null);
     setIsScanning(false);
-  
+
     setSelectedOption("qr");
     setShowQRModal(true);
-  };  
+  };
 
   const startAnalysis = (imageData: string) => {
     setIsScanning(true);
@@ -143,38 +156,7 @@ export function WebSkinScan({ onComplete, forceCameraMode = false }: WebSkinScan
   // PANTALLA DE "ANALYZING"
   // ==========================
   if (isScanning && uploadedImage) {
-    return (
-      <div className="min-h-screen bg-[#F5F5F5] flex flex-col">
-        {/* Header with logo */}
-        <div className="bg-white border-b border-[#E5E5E5] px-8 py-6">
-          <div className="max-w-7xl mx-auto flex justify-end">
-            <img src={bloomLogo} alt="Bloom" className="h-12" />
-          </div>
-        </div>
-        
-        {/* Content */}
-        <div className="flex-1 flex items-center justify-center px-4 md:px-8">
-          <div className="max-w-2xl w-full bg-white rounded-3xl border border-[#E5E5E5] p-8 md:p-12 shadow-lg text-center">
-            <div className="w-20 h-20 md:w-24 md:h-24 rounded-full bg-gradient-to-br from-[#FF6B4A] to-[#FFA94D] flex items-center justify-center mx-auto mb-6 md:mb-8 animate-pulse">
-              <Sparkles className="w-10 h-10 md:w-12 md:h-12 text-white" />
-            </div>
-            <h2
-              className="text-[#18212D] mb-3 md:mb-4 font-['Manrope',sans-serif]"
-              style={{ fontSize: "28px", lineHeight: "36px" }}
-            >
-              Analyzing your skin...
-            </h2>
-            <p className="text-[#6B7280] mb-6 md:mb-8 font-['Manrope',sans-serif]">
-              Our AI is processing your image and generating personalized insights
-            </p>
-            <div className="relative w-full max-w-md mx-auto aspect-[4/5] rounded-2xl overflow-hidden border-4 border-[#FF6B4A]">
-              <img src={uploadedImage} alt="Analyzing" className="w-full h-full object-cover" />
-              <div className="absolute inset-0 bg-gradient-to-b from-transparent via-[#FF6B4A]/20 to-transparent animate-pulse" />
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+    return <AnalyzingScreen imageUrl={uploadedImage} />;
   }
 
   // ==========================
@@ -213,9 +195,7 @@ export function WebSkinScan({ onComplete, forceCameraMode = false }: WebSkinScan
                 muted
                 className="w-full h-full object-cover"
               />
-              {/* borde exterior suave */}
               <div className="absolute inset-0 border border-white/20 rounded-3xl pointer-events-none" />
-              {/* círculo guía como en la captura */}
               <div className="absolute inset-[18%] md:inset-[20%] border-[2px] border-[#FF6B4A]/70 rounded-full pointer-events-none" />
             </div>
 
@@ -275,8 +255,8 @@ export function WebSkinScan({ onComplete, forceCameraMode = false }: WebSkinScan
               Facial Image Capture
             </h2>
             <p className="text-[#6B7280] mb-4 md:mb-6 font-['Manrope',sans-serif]">
-              Please ensure good lighting and remove any makeup or accessories for the most accurate
-              analysis.
+              Please ensure good lighting and remove any makeup or accessories
+              for the most accurate analysis.
             </p>
 
             <div className="bg-[#F5F5F5] rounded-2xl p-4 md:p-6">
@@ -376,52 +356,54 @@ export function WebSkinScan({ onComplete, forceCameraMode = false }: WebSkinScan
           </div>
         </div>
       </main>
+
+      {/* QR MODAL */}
       {showQRModal && (
-  <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-    <div className="relative bg-white rounded-3xl border border-[#E5E5E5] p-6 md:p-8 pt-10 md:pt-12 max-w-sm w-full text-center shadow-xl">
-      {/* Botón X arriba a la derecha */}
-      <button
-        onClick={() => setShowQRModal(false)}
-        className="absolute top-4 right-4 text-[#9CA3AF] hover:text-[#111827] text-xl leading-none"
-        aria-label="Close QR modal"
-      >
-        ×
-      </button>
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="relative bg-white rounded-3xl border border-[#E5E5E5] p-6 md:p-8 pt-10 md:pt-12 max-w-sm w-full text-center shadow-xl">
+            <button
+              onClick={() => setShowQRModal(false)}
+              className="absolute top-4 right-4 text-[#9CA3AF] hover:text-[#111827] text-xl leading-none"
+              aria-label="Close QR modal"
+            >
+              ×
+            </button>
 
-      <h2
-        className="text-[#18212D] font-['Manrope',sans-serif] mb-2"
-        style={{ fontSize: "22px", lineHeight: "30px" }}
-      >
-        Scan this QR code on your phone
-      </h2>
+            <h2
+              className="text-[#18212D] font-['Manrope',sans-serif] mb-2"
+              style={{ fontSize: "22px", lineHeight: "30px" }}
+            >
+              Scan this QR code on your phone
+            </h2>
 
-      <p className="text-[#6B7280] mb-4 font-['Manrope',sans-serif]">
-        Open your camera, scan it, and continue the analysis on your mobile.
-      </p>
+            <p className="text-[#6B7280] mb-4 font-['Manrope',sans-serif]">
+              Open your camera, scan it, and continue the analysis on your
+              mobile.
+            </p>
 
-      {/* QR CODE */}
-      {(() => {
-        const qrLink = "https://bapp-swart.vercel.app/capture";
-        return (
-          <img
-            src={`https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(
-              qrLink
-            )}`}
-            alt="Bloom QR code"
-            className="mx-auto rounded-2xl mb-4"
-          />
-        );
-      })()}
+            {(() => {
+              const qrLink = "https://bapp-swart.vercel.app/capture";
+              return (
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(
+                    qrLink
+                  )}`}
+                  alt="Bloom QR code"
+                  className="mx-auto rounded-2xl mb-4"
+                />
+              );
+            })()}
 
-      <button
-        onClick={() => setShowQRModal(false)}
-        className="mt-3 w-full h-11 px-6 bg-[#18212D] hover:bg-[#111827] text-white rounded-full font-['Manrope',sans-serif]"
-      >
-        Close
-      </button>
-    </div>
-  </div>
-)}
+            <button
+              onClick={() => setShowQRModal(false)}
+              className="mt-3 w-full h-11 px-6 bg-[#18212D] hover:bg-[#111827] text-white rounded-full font-['Manrope',sans-serif]"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Hidden file input */}
       <input
         ref={fileInputRef}
