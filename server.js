@@ -4,9 +4,19 @@
 const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
+const OpenAI = require("openai");
 
 // Load env vars from .env.local (same ones used by Vite)
 dotenv.config({ path: ".env.local" });
+
+console.log(
+  "[DEBUG] OPENAI_API_KEY está cargada?",
+  !!process.env.OPENAI_API_KEY
+);
+console.log(
+  "[DEBUG] Primeros caracteres de la clave:",
+  process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.slice(0, 8)
+);
 
 const app = express();
 const PORT = process.env.PORT || 8787;
@@ -17,6 +27,11 @@ const HAUT_BASE_V3 = "https://saas.haut.ai/api/v3";
 const API_KEY = process.env.VITE_HAUT_API_KEY;
 const COMPANY_ID = process.env.VITE_HAUT_COMPANY_ID;
 const DATASET_ID = process.env.VITE_HAUT_DATASET_ID;
+
+// OpenAI client (Bloom recommendations / chat)
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 if (!API_KEY || !COMPANY_ID || !DATASET_ID) {
   console.warn(
@@ -67,9 +82,10 @@ async function createSubject(subjectName) {
 
   const body = {
     // 👇 ESTE CAMPO ES OBLIGATORIO SEGÚN EL ERROR
-    name: subjectName && subjectName.trim().length > 0
-      ? subjectName
-      : "Bloom Web User",
+    name:
+      subjectName && subjectName.trim().length > 0
+        ? subjectName
+        : "Bloom Web User",
     age: null,
     phenotype: null,
     biological_sex: null,
@@ -197,7 +213,9 @@ async function waitForResults(batchId, options = {}) {
   throw err;
 }
 
-// Main endpoint called from the frontend hook
+// ============================================
+// MAIN HAUT ENDPOINT CALLED FROM THE FRONTEND
+// ============================================
 app.post("/api/haut-inference", async (req, res) => {
   try {
     const { base64Image, subjectName } = req.body || {};
@@ -259,8 +277,55 @@ app.post("/api/haut-inference", async (req, res) => {
   }
 });
 
+// ============================================
+// OPENAI: SIMPLE RECOMMENDATIONS ENDPOINT
+// ============================================
+app.post("/api/openai-recommendations", async (req, res) => {
+  try {
+    const { userProfile, hautMetrics } = req.body || {};
+
+    const response = await openai.responses.create({
+      model: "gpt-4.1-mini",
+      instructions:
+        "Eres Bloom, una asistente experta en cuidado de la piel. Hablas en español neutro, tono calmado, claro y minimalista.",
+      input: `
+        Este es el perfil del usuario (puede estar vacío):
+        ${JSON.stringify(userProfile || {}, null, 2)}
+
+        Estas son sus métricas de piel (pueden estar vacías):
+        ${JSON.stringify(hautMetrics || {}, null, 2)}
+
+        Genera un mensaje muy corto (máximo 2 frases) dando la bienvenida a Bloom
+        y explicando que pronto verá recomendaciones basadas en su piel.
+      `,
+    });
+
+    // Intentamos obtener el texto de forma robusta
+    let message =
+      response.output_text ||
+      response.output?.[0]?.content?.[0]?.text ||
+      "Bienvenida a Bloom ✨";
+
+    return res.status(200).json({
+      ok: true,
+      message,
+    });
+  } catch (error) {
+    console.error("[Bloom OpenAI] Error in /api/openai-recommendations:", {
+      message: error.message,
+      status: error.status,
+      details: error.details,
+    });
+
+    return res.status(500).json({
+      ok: false,
+      error: "Error generando recomendaciones con OpenAI",
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(
-    `Bloom Haut backend running on http://localhost:${PORT} (POST /api/haut-inference)`
+    `Bloom backend running on http://localhost:${PORT} (POST /api/haut-inference, /api/openai-recommendations)`
   );
 });

@@ -13,7 +13,7 @@ import { exportElementToPdf } from "../utils/exportToPdf";
 
 import {
   skinMetrics as staticSkinMetrics,
-  overallHealth,
+  overallHealth as mockOverallHealth,
   recommendations,
 } from "../constants/skinAnalysis";
 import { formatDate } from "../utils/helpers";
@@ -27,8 +27,9 @@ import { MetricDetailModal } from "./results/MetricDetailModal";
 import { ShareModal } from "./results/ShareModal";
 import { RoutineCard } from "./results/RoutineCard";
 
-// Haut hook
+// Haut hook + mapper para OverallHealth real
 import { useHautInference } from "../hooks/useHautInference";
+import { mapFaceSkin3ToOverallHealth } from "../lib/haut";
 
 interface WebResultsScreenProps {
   capturedImage: string | null;
@@ -37,15 +38,32 @@ interface WebResultsScreenProps {
 
 const SKIN_TYPE_ID = "skin_type";
 
+// IDs de las métricas que usamos para el Overall Health (promedio)
+const OVERALL_METRIC_IDS = [
+  "acne",
+  "redness",
+  "pores",
+  "sagging",
+  "pigmentation",
+  "dark_circles",
+  "lines_wrinkles",
+];
+
 // Simple mapping from Haut algorithm tech names → Bloom metric IDs.
 const TECH_NAME_TO_SKIN_METRIC_ID: Record<string, string> = {
   // básicos que ya tenemos en UI
   acne: "acne",
   redness: "redness",
   pores: "pores",
-  hydration: "hydration",
   pigmentation: "pigmentation",
-  translucency: "translucency",
+
+  // NUEVO: sagging & dark circles
+  sagging: "sagging",
+  dark_circles: "dark_circles",
+
+  // Soportar nombres antiguos si Haut aún usa hydration/translucency
+  hydration: "sagging",
+  translucency: "dark_circles",
 
   // Haut "lines" → Bloom "Lines & Wrinkles"
   lines: "lines_wrinkles",
@@ -57,7 +75,6 @@ const TECH_NAME_TO_SKIN_METRIC_ID: Record<string, string> = {
   skin_type: "skin_type",
   skin_tone: "skin_tone",
 };
-
 
 export function WebResultsScreen({
   capturedImage,
@@ -77,16 +94,21 @@ export function WebResultsScreen({
   // Minimal data for share (later you can connect to real user email)
   const userEmail = "user@example.com";
 
-  // Active metric ONLY for the photo dropdown
+  // Active metric ONLY for the photo dropdown (por si luego lo usamos)
   const [activeMetricId, setActiveMetricId] = useState<string | null>(null);
 
   // Metrics we actually display (start with static, then override with Haut values)
   const [displayMetrics, setDisplayMetrics] =
     useState<SkinMetric[]>(staticSkinMetrics);
 
-    // Mapa: id de métrica → URL de la imagen con máscara de Haut
-const [metricMasks, setMetricMasks] = useState<Record<string, string | undefined>>({});
+  // Overall health dinámico (Skin Type + Skin Age + Skin Tone reales con fallback al mock)
+  const [dynamicOverallHealth, setDynamicOverallHealth] =
+    useState(mockOverallHealth);
 
+  // Mapa: id de métrica → URL de la imagen con máscara de Haut (opcional, debug/futuro)
+  const [metricMasks, setMetricMasks] = useState<
+    Record<string, string | undefined>
+  >({});
 
   // Call Haut inference whenever we have a captured image
   const {
@@ -96,18 +118,63 @@ const [metricMasks, setMetricMasks] = useState<Record<string, string | undefined
     isLoading: isHautLoading,
   } = useHautInference(capturedImage);
 
-    // URLs de Haut para usar en el modal de detalle
-    const faceSkin3 = (hautResult?.rawResults?.[0] as any)?.face_skin_metrics_3;
+  // ============================
+  // Imagen base + máscaras Haut
+  // ============================
+  const faceSkin3 = (hautResult?.rawResults?.[0] as any)?.face_skin_metrics_3;
 
-    const hautFaceImageUrl: string | undefined =
-      faceSkin3?.predicted_images?.front?.aligned_face ??
-      faceSkin3?.predicted_images?.front?.anonymised ??
-      faceSkin3?.predicted_images?.front?.original;
-  
-    const hautLinesMaskUrl: string | undefined =
-      faceSkin3?.parameters?.lines?.masks?.front?.aligned_face ??
-      faceSkin3?.parameters?.lines?.masks?.front?.anonymised ??
-      faceSkin3?.parameters?.lines?.masks?.front?.original;  
+  let hautFaceImageUrl: string | undefined;
+  let hautLinesMaskUrl: string | undefined;
+  let hautPoresMaskUrl: string | undefined;
+  let hautPigmentationMaskUrl: string | undefined;
+  let hautAcneMaskUrl: string | undefined;
+  let hautRednessMaskUrl: string | undefined;
+  let hautSaggingMaskUrl: string | undefined;
+  let hautDarkCirclesMaskUrl: string | undefined;
+
+  if (faceSkin3) {
+    const frontImages = faceSkin3.predicted_images?.front ?? {};
+    const variantOrder = ["aligned_face", "anonymised", "original"] as const;
+
+    const chosenVariant =
+      variantOrder.find((v) => frontImages && frontImages[v]) ?? undefined;
+
+    hautFaceImageUrl =
+      (chosenVariant && frontImages[chosenVariant]) ||
+      frontImages.aligned_face ||
+      frontImages.anonymised ||
+      frontImages.original;
+
+    const getMask = (
+      metricKey:
+        | "lines"
+        | "pores"
+        | "pigmentation"
+        | "breakouts"
+        | "redness"
+        | "sagging"
+        | "dark_circles"
+    ) => {
+      const masksFront =
+        faceSkin3.parameters?.[metricKey]?.masks?.front ?? {};
+      if (chosenVariant && masksFront[chosenVariant]) {
+        return masksFront[chosenVariant];
+      }
+      return (
+        masksFront.aligned_face ||
+        masksFront.anonymised ||
+        masksFront.original
+      );
+    };
+
+    hautLinesMaskUrl = getMask("lines");
+    hautPoresMaskUrl = getMask("pores");
+    hautPigmentationMaskUrl = getMask("pigmentation");
+    hautAcneMaskUrl = getMask("breakouts");
+    hautRednessMaskUrl = getMask("redness");
+    hautSaggingMaskUrl = getMask("sagging");
+    hautDarkCirclesMaskUrl = getMask("dark_circles");
+  }
 
   // Options for the photo dropdown (without skin_type)
   const metricOptionsForPhoto = displayMetrics
@@ -119,7 +186,9 @@ const [metricMasks, setMetricMasks] = useState<Record<string, string | undefined
       label: (m as any).label,
     }));
 
-      // When Haut returns results, update the scores & statuses of known metrics
+  // ============================
+  // 1) Actualizar métricas (scores + status)
+  // ============================
   useEffect(() => {
     if (!hautResult || !hautResult.metrics || hautResult.metrics.length === 0) {
       return;
@@ -143,14 +212,14 @@ const [metricMasks, setMetricMasks] = useState<Record<string, string | undefined
           ...existing,
           score: m.value ?? existing.score,
           // AQUÍ usamos el tag de Haut (Great / Average / etc.)
-          status: m.tag || existing.status,
+          status: (m.tag as any) || existing.status,
         });
       }
 
       return Array.from(byId.values());
     });
 
-    // 2) Guardamos las URLs de las máscaras para usarlas en el modal
+    // 2) Guardamos las URLs de las máscaras para usarlas en el modal (debug / futuro)
     setMetricMasks((prevMasks) => {
       const next = { ...prevMasks };
 
@@ -166,7 +235,42 @@ const [metricMasks, setMetricMasks] = useState<Record<string, string | undefined
 
       return next;
     });
-  }, [hautResult]);  
+  }, [hautResult]);
+
+  // ============================
+  // 2) Actualizar Skin Type + Skin Age + Skin Tone (ITA) desde Haut
+  // ============================
+  useEffect(() => {
+    if (!hautResult || !hautResult.rawResults?.length) return;
+
+    const rawBlock = hautResult.rawResults[0];
+    const mapped = mapFaceSkin3ToOverallHealth(rawBlock);
+
+    if (!mapped) return;
+
+    setDynamicOverallHealth(mapped);
+  }, [hautResult]);
+
+  // ============================
+  // 3) Calcular Overall Health como promedio de 7 métricas
+  // ============================
+  useEffect(() => {
+    if (!displayMetrics || displayMetrics.length === 0) return;
+
+    const relevantMetrics = displayMetrics.filter((m) =>
+      OVERALL_METRIC_IDS.includes(m.id)
+    );
+
+    if (relevantMetrics.length === 0) return;
+
+    const sum = relevantMetrics.reduce((acc, m) => acc + (m.score ?? 0), 0);
+    const avg = Math.round(sum / relevantMetrics.length);
+
+    setDynamicOverallHealth((prev) => ({
+      ...prev,
+      score: avg,
+    }));
+  }, [displayMetrics]);
 
   const handleDownloadReport = async () => {
     if (!reportRef.current || isDownloading) return;
@@ -211,12 +315,10 @@ const [metricMasks, setMetricMasks] = useState<Record<string, string | undefined
   }
 
   // Loading state while Haut is processing
-if (isHautLoading) {
-  // Usa la misma imagen que más abajo se pasa a <AnalyzedPhoto />
-  const loadingImage = capturedImage || exampleImage;
-
-  return <AnalyzingScreen imageUrl={loadingImage} />;
-}
+  if (isHautLoading) {
+    const loadingImage = capturedImage || exampleImage;
+    return <AnalyzingScreen imageUrl={loadingImage} />;
+  }
 
   // Error state if Haut failed
   if (hautStatus === "failed") {
@@ -288,7 +390,7 @@ if (isHautLoading) {
               <Button
                 type="button"
                 onClick={() => onViewDashboard?.()}
-                className="h-12 px-6 bg-white hover:bg-gradient-to-r hover:from-[#FFF5F3] hover:to-[#FFE5DD] text-[#18212D] hover:text-[#FF6B4A] rounded-full border border-[#E5E5E5] hover:border-[#FF6B4A]/30 font-['Manrope',sans-serif] transition-all duration-300"
+                className="h-12 px-6 bg-white text-[#FF6B4A] border border-[#FF6B4A] hover:bg-[#FFF5F3] hover:text-[#FF6B4A] rounded-full font-['Manrope',sans-serif] transition-all duration-300"
               >
                 <LayoutDashboard className="w-4 h-4 mr-2" />
                 Go to Dashboard
@@ -298,7 +400,7 @@ if (isHautLoading) {
               <Button
                 type="button"
                 onClick={() => setIsShareOpen(true)}
-                className="h-12 px-6 bg-white hover:bg-gradient-to-r hover:from-[#FFF5F3] hover:to-[#FFE5DD] text-[#18212D] hover:text-[#FF6B4A] rounded-full border border-[#E5E5E5] hover:border-[#FF6B4A]/30 font-['Manrope',sans-serif] transition-all duration-300"
+                className="h-12 px-6 bg-white text-[#FF6B4A] border border-[#FF6B4A] hover:bg-[#FFF5F3] hover:text-[#FF6B4A] rounded-full font-['Manrope',sans-serif] transition-all duration-300"
               >
                 <Share2 className="w-4 h-4 mr-2" />
                 Share
@@ -309,7 +411,7 @@ if (isHautLoading) {
                 type="button"
                 onClick={handleDownloadReport}
                 disabled={isDownloading}
-                className="h-12 px-6 bg-white hover:bg-gradient-to-r hover:from-[#FFF5F3] hover:to-[#FFE5DD] text-[#18212D] hover:text-[#FF6B4A] rounded-full border border-[#E5E5E5] hover:border-[#FF6B4A]/30 font-['Manrope',sans-serif] transition-all duration-300 disabled:opacity-60 disabled:cursor-not-allowed"
+                className="h-12 px-6 bg-white text-[#FF6B4A] border border-[#FF6B4A] hover:bg-[#FFF5F3] hover:text-[#FF6B4A] rounded-full font-['Manrope',sans-serif] transition-all duration-300 disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <Download className="w-4 h-4 mr-2" />
                 {isDownloading ? "Generating PDF..." : "Download Report"}
@@ -323,14 +425,21 @@ if (isHautLoading) {
           {/* Photo + Radar */}
           <div className="mb-8">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <AnalyzedPhoto
-  imageUrl={capturedImage || exampleImage}
-  hautFaceImageUrl={hautFaceImageUrl}      // misma que pasas al modal
-  hautLinesMaskUrl={hautLinesMaskUrl}      // misma que pasas al modal
-/>
+              <AnalyzedPhoto
+                imageUrl={capturedImage || exampleImage}
+                hautFaceImageUrl={hautFaceImageUrl}
+                hautLinesMaskUrl={hautLinesMaskUrl}
+                hautPoresMaskUrl={hautPoresMaskUrl}
+                hautPigmentationMaskUrl={hautPigmentationMaskUrl}
+                hautAcneMaskUrl={hautAcneMaskUrl}
+                hautRednessMaskUrl={hautRednessMaskUrl}
+                hautSaggingMaskUrl={hautSaggingMaskUrl}
+                hautDarkCirclesMaskUrl={hautDarkCirclesMaskUrl}
+              />
+
               <RadarOverview
                 metrics={displayMetrics}
-                overallHealth={overallHealth}
+                overallHealth={dynamicOverallHealth}
               />
             </div>
           </div>
@@ -350,6 +459,7 @@ if (isHautLoading) {
                   metric={metric}
                   onClick={(m) => {
                     setSelectedMetric(m);
+                    setActiveMetricId(m.id);
                   }}
                 />
               ))}
@@ -373,7 +483,7 @@ if (isHautLoading) {
 
           {/* CTA Dashboard */}
           {onViewDashboard && (
-            <div className="bg-gradient-to-br from-white to orange-50/30 rounded-3xl border border-[#E5E5E5] p-12 text-center shadow-lg">
+            <div className="bg-gradient-to-br from-white to-orange-50/30 rounded-3xl border border-[#E5E5E5] p-12 text-center shadow-lg">
               <div className="w-20 h-20 rounded-full bg-gradient-to-br from-[#FF6B4A] to-[#FFA94D] flex items-center justify-center mx-auto mb-6">
                 <LayoutDashboard className="w-10 h-10 text-white" />
               </div>
@@ -402,13 +512,19 @@ if (isHautLoading) {
 
       {/* These go OUTSIDE the PDF wrapper */}
 
-            {/* Metric detail modal */}
-            <MetricDetailModal
+      {/* Metric detail modal */}
+      <MetricDetailModal
         metric={selectedMetric}
         onClose={() => setSelectedMetric(null)}
         imageUrl={capturedImage || exampleImage}
         hautFaceImageUrl={hautFaceImageUrl}
         hautLinesMaskUrl={hautLinesMaskUrl}
+        hautPoresMaskUrl={hautPoresMaskUrl}
+        hautPigmentationMaskUrl={hautPigmentationMaskUrl}
+        hautAcneMaskUrl={hautAcneMaskUrl}
+        hautRednessMaskUrl={hautRednessMaskUrl}
+        hautSaggingMaskUrl={hautSaggingMaskUrl}
+        hautDarkCirclesMaskUrl={hautDarkCirclesMaskUrl}
       />
 
       {/* SHARE MODAL */}

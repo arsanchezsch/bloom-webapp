@@ -1,6 +1,8 @@
 // src/lib/haut.ts
 // Cliente ligero para la API SaaS de Haut.AI
 
+import type { OverallHealth } from "../types";
+
 const HAUT_SAAS_HOST = "https://saas.haut.ai";
 const API_BASE = `${HAUT_SAAS_HOST}/api/v1`;
 
@@ -250,6 +252,8 @@ export async function mapRawResultsToMetrics(
     addFromParam("redness", "redness");
     addFromParam("pigmentation", "pigmentation");
     addFromParam("acne", "breakouts");
+    addFromParam("sagging", "sagging");
+    addFromParam("dark_circles", "dark_circles");
     addFromParam("skin_type", "skin_type");
     addFromParam("skin_tone", "skintone");
     addFromParam("age", "age");
@@ -335,3 +339,303 @@ export function mapFaceSkin3LinesToBloom(rawBlock: any) {
     description: "Real wrinkles analysis from Haut.AI Face Skin Metrics 3.0",
   };
 }
+// ============================================
+// MAP: FACE SKIN METRICS 3 → Bloom (PORES)
+// ============================================
+
+export function mapFaceSkin3PoresToBloom(rawBlock: any) {
+  // 1) Verificamos que exista el bloque correcto
+  if (!rawBlock?.face_skin_metrics_3) return null;
+
+  const params = rawBlock.face_skin_metrics_3.parameters;
+  if (!params?.pores) return null;
+
+  const haut = params.pores;
+
+  // 2) Normalizamos score
+  const rawScore =
+    typeof haut.score === "number"
+      ? haut.score
+      : typeof haut.value === "number"
+      ? haut.value
+      : 0;
+
+  const score = rawScore <= 1 ? Math.round(rawScore * 100) : Math.round(rawScore);
+
+  // 3) Biomarcadores (ajustaremos con tu JSON real si quieres)
+  const count =
+    haut.count ??
+    haut.number ??
+    haut.metrics?.count ??
+    0;
+
+  const density =
+    haut.density ??
+    haut.metrics?.density ??
+    null;
+
+  return {
+    id: "pores",
+    score,
+    rawScore,
+    details: {
+      count,
+      density,
+      ...haut,
+    },
+  };
+}
+// ============================================
+// MAP: FACE SKIN METRICS 3 → Bloom (PIGMENTATION)
+// ============================================
+export function mapFaceSkin3PigmentationToBloom(rawBlock: any) {
+  // 1) Verificamos que exista el bloque correcto
+  if (!rawBlock?.face_skin_metrics_3) return null;
+
+  const params = rawBlock.face_skin_metrics_3.parameters;
+  if (!params?.pigmentation) return null;
+
+  const haut = params.pigmentation;
+
+  // 2) Normalizamos score (igual filosofía que en Pores)
+  const rawScore =
+    typeof haut.score === "number"
+      ? haut.score
+      : typeof haut.value === "number"
+      ? haut.value
+      : 0;
+
+  const score =
+    rawScore <= 1 ? Math.round(rawScore * 100) : Math.round(rawScore);
+
+  // 3) Biomarcadores básicos (los afinamos cuando veamos el JSON real)
+  const spotsCount =
+    haut.spots_count ??
+    haut.count ??
+    haut.metrics?.spots_count ??
+    haut.metrics?.count ??
+    0;
+
+  const coverage =
+    haut.coverage ??
+    haut.area ??
+    haut.metrics?.coverage ??
+    haut.metrics?.area ??
+    null;
+
+  const intensity =
+    haut.intensity ??
+    haut.severity ??
+    haut.metrics?.intensity ??
+    null;
+
+  return {
+    id: "pigmentation",
+    score,
+    rawScore,
+    details: {
+      spotsCount,
+      coverage,
+      intensity,
+      // dejamos todo lo demás por si luego lo queremos usar
+      ...haut,
+    },
+  };
+}
+
+// ============================================
+// MAP: FACE SKIN METRICS 3 → Bloom OverallHealth
+// Skin Age + Skin Type + Skin Tone (ITA real)
+// ============================================
+export function mapFaceSkin3ToOverallHealth(
+  rawBlock: any,
+  userActualAge?: number
+): OverallHealth | null {
+  if (!rawBlock?.face_skin_metrics_3) return null;
+
+  const fs3 = rawBlock.face_skin_metrics_3 ?? {};
+  const params = fs3.parameters ?? {};
+
+  // Mezclamos predicted_labels del root y de face_skin_metrics_3 (por si Haut los pone en distintos sitios)
+  const labels = {
+    ...(rawBlock.predicted_labels ?? {}),
+    ...(fs3.predicted_labels ?? {}),
+  };
+
+  const ageParam = params.age ?? params.skin_age;
+  const skinTypeParam = params.skin_type;
+
+  // ⚠️ Aquí es la clave: ITA suele venir como "ita" / "ITA"
+  const itaParam =
+    params.ita ?? params.ITA ?? params.ItA ?? params.itA ?? null;
+
+  const pickNumber = (...candidates: any[]): number | undefined => {
+    for (const v of candidates) {
+      if (typeof v === "number" && !Number.isNaN(v)) return v;
+    }
+    return undefined;
+  };
+
+  const pickString = (...candidates: any[]): string | undefined => {
+    for (const v of candidates) {
+      if (typeof v === "string" && v.trim().length > 0) return v.trim();
+    }
+    return undefined;
+  };
+
+  // Helper: buscar un número con ciertas keys (ita, ita_angle, etc.) recorriendo el objeto
+  const findNumberDeepByKeyList = (
+    obj: any,
+    keysLower: string[]
+  ): number | undefined => {
+    if (!obj || typeof obj !== "object") return undefined;
+
+    for (const [k, v] of Object.entries(obj)) {
+      const lowerK = k.toLowerCase();
+
+      if (keysLower.includes(lowerK)) {
+        if (typeof v === "number") return v;
+        if (v && typeof v === "object" && typeof (v as any).value === "number") {
+          return (v as any).value;
+        }
+      }
+
+      if (v && typeof v === "object") {
+        const nested = findNumberDeepByKeyList(v, keysLower);
+        if (nested !== undefined) return nested;
+      }
+    }
+
+    return undefined;
+  };
+
+  // -------------------------
+  // 🔹 SKIN AGE (ya la teníamos)
+  // -------------------------
+  const perceivedAgeRaw = pickNumber(
+    labels.perceived_age,
+    ageParam?.age,
+    ageParam?.predicted_age,
+    ageParam?.apparent_age,
+    ageParam?.biological_age,
+    ageParam?.eyes_age
+  );
+
+  const actualAgeRaw = pickNumber(
+    userActualAge,
+    labels.actual_age,
+    ageParam?.calendar_age,
+    ageParam?.chronological_age,
+    ageParam?.real_age
+  );
+
+  const perceivedAge =
+    typeof perceivedAgeRaw === "number"
+      ? Math.round(perceivedAgeRaw)
+      : undefined;
+
+  const actualAge =
+    typeof actualAgeRaw === "number" ? Math.round(actualAgeRaw) : undefined;
+
+  let ageAdvantage = "—";
+  if (typeof perceivedAge === "number" && typeof actualAge === "number") {
+    const diff = actualAge - perceivedAge;
+    if (diff === 0) ageAdvantage = "Same as your age";
+    else if (diff > 0) ageAdvantage = `~${diff} years younger`;
+    else ageAdvantage = `~${Math.abs(diff)} years older`;
+  }
+
+  // -------------------------
+  // 🔹 SKIN TYPE (Oily, Dry, etc.)
+  // -------------------------
+  const KNOWN_SKIN_TYPES = [
+    "oily",
+    "dry",
+    "combination",
+    "normal",
+    "sensitive",
+    "balanced",
+  ];
+
+  let skinType: string | undefined = pickString(
+    labels.skin_type,
+    labels.skin_type_label,
+    skinTypeParam?.type_label,
+    skinTypeParam?.skin_type,
+    skinTypeParam?.category,
+    skinTypeParam?.tag
+  );
+
+  if (!skinType && skinTypeParam && typeof skinTypeParam === "object") {
+    for (const value of Object.values(skinTypeParam)) {
+      if (typeof value === "string") {
+        const lower = value.toLowerCase();
+        if (KNOWN_SKIN_TYPES.includes(lower)) {
+          skinType = value;
+          break;
+        }
+      }
+    }
+  }
+
+  if (!skinType) {
+    skinType = "Not available";
+  }
+
+  // -------------------------
+  // 🔹 ITA (Individual Typology Angle)
+  // -------------------------
+  // 1) Buscamos en predicted_labels
+  // 2) Luego dentro de parameters.ita (itaParam)
+  const itaFromTree = findNumberDeepByKeyList(itaParam, [
+    "ita",
+    "ita_angle",
+    "ita_value",
+    "ita_score",
+  ]);
+
+  const itaAngleNum = pickNumber(
+    labels.ita,
+    labels.ITA,
+    labels.ita_angle,
+    labels.ita_value,
+    itaFromTree
+  );
+
+  const itaAngle =
+    typeof itaAngleNum === "number" ? `${Math.round(itaAngleNum)}` : "—";
+
+  // -------------------------
+  // 🔹 SKIN TONE (lo representamos como ITA)
+  // -------------------------
+  let skinTone = "Not available";
+
+  if (typeof itaAngleNum === "number") {
+    // Esto es lo que verás en la card "Skin Tone"
+    skinTone = `${Math.round(itaAngleNum)}`;
+  }
+
+  // -------------------------
+  // 🔹 OVERALL SCORE
+  // -------------------------
+  const scoreNum = pickNumber(ageParam?.score, fs3.overall_score);
+  const score =
+    typeof scoreNum === "number" ? Math.round(scoreNum) : 72;
+
+  return {
+    score,
+    skinTone,    // 👉 En tu UI actual, "Skin Tone" mostrará el número ITA (por ejemplo 23)
+    itaAngle,    // 👉 También guardamos el ITA por separado por si lo quieres usar luego
+    perceivedAge: perceivedAge ?? actualAge ?? 0,
+    actualAge: actualAge ?? perceivedAge ?? 0,
+    ageAdvantage,
+    skinType,
+  };
+}
+
+
+
+
+
+
+

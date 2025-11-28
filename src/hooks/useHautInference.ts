@@ -8,6 +8,8 @@ import {
   type HautScanResult,
   type HautScanIdentifiers,
   mapFaceSkin3LinesToBloom,
+  mapFaceSkin3PoresToBloom,
+  mapFaceSkin3PigmentationToBloom, // 👈 NUEVO IMPORT
 } from "../lib/haut";
 
 export type InferenceStatus =
@@ -139,8 +141,10 @@ export function useHautInference(
           // Mapeo genérico (por si queremos seguir usándolo después)
           metrics = await mapRawResultsToMetrics(rawResults);
 
-          // 3) Extra: conectar Face Skin Metrics 3.0 -> Bloom (Lines & Wrinkles)
+          // 3) Extra: conectar Face Skin Metrics 3.0 -> Bloom
           const faceSkinBlock = rawResults[0]; // nuestro backend devuelve 1 bloque
+
+          // ---- Lines & Wrinkles ----
           const linesMetric = mapFaceSkin3LinesToBloom(faceSkinBlock);
 
           if (linesMetric) {
@@ -148,9 +152,41 @@ export function useHautInference(
               id: linesMetric.id, // "lines_wrinkles"
               label: "Lines & Wrinkles",
               value: linesMetric.score,
-              techName: "face_skin_metrics_3.lines",
+              // IMPORTANTE: nombre corto para que encaje con TECH_NAME_TO_SKIN_METRIC_ID
+              techName: "lines",
               familyName: "Lines",
               raw: linesMetric, // guardamos todo por si lo necesitamos luego
+            });
+          }
+
+          // ---- Pores ----
+          const poresMetric = mapFaceSkin3PoresToBloom(faceSkinBlock);
+
+          if (poresMetric) {
+            metrics.push({
+              id: "pores", // id interno que usaremos en Bloom
+              label: "Pores",
+              value: poresMetric.score,
+              // IMPORTANTE: nombre corto para que encaje con TECH_NAME_TO_SKIN_METRIC_ID
+              techName: "pores",
+              familyName: "Pores",
+              raw: poresMetric,
+            });
+          }
+
+          // ---- Pigmentation (NUEVO) ----
+          const pigmentationMetric =
+            mapFaceSkin3PigmentationToBloom(faceSkinBlock);
+
+          if (pigmentationMetric) {
+            metrics.push({
+              id: "pigmentation", // id interno en Bloom
+              label: "Pigmentation",
+              value: pigmentationMetric.score,
+              // IMPORTANTE: coincide con TECH_NAME_TO_SKIN_METRIC_ID["pigmentation"]
+              techName: "pigmentation",
+              familyName: "Pigmentation",
+              raw: pigmentationMetric,
             });
           }
         } catch (e) {
