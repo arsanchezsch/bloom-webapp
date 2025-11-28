@@ -74,101 +74,15 @@ export function AnalyzedPhoto({
   // ⚠️ Igual que en el modal: siempre usamos la foto alineada si existe
   const basePhoto = hautFaceImageUrl || imageUrl;
 
-  const getHighlightColor = (metric: MetricHighlight): string => {
-    switch (metric) {
-      case "acne":
-        return "rgba(255, 107, 74, 0.35)";
-      case "pores":
-        return "rgba(255, 169, 77, 0.35)";
-      case "pigmentation":
-        return "rgba(255, 193, 7, 0.35)";
-      case "redness":
-        return "rgba(239, 68, 68, 0.35)";
-      case "sagging":
-        return "rgba(59, 130, 246, 0.35)";
-      case "dark_circles":
-        return "rgba(168, 85, 247, 0.35)";
-      case "lines":
-        return "rgba(107, 114, 128, 0.35)";
-      default:
-        return "transparent";
-    }
-  };
-
-  const renderHighlightAreas = () => {
-    if (selectedMetric === "none") return null;
-
-    // Si estamos en métricas con máscara real, no mostramos fake overlays
-    if (selectedMetric === "lines" && hautLinesMaskUrl) return null;
-    if (selectedMetric === "pores" && hautPoresMaskUrl) return null;
-    if (selectedMetric === "pigmentation" && hautPigmentationMaskUrl) return null;
-    if (selectedMetric === "acne" && hautAcneMaskUrl) return null;
-    if (selectedMetric === "redness" && hautRednessMaskUrl) return null;
-    if (selectedMetric === "sagging" && hautSaggingMaskUrl) return null;
-    if (selectedMetric === "dark_circles" && hautDarkCirclesMaskUrl) return null;
-
-    const overlays = {
-      acne: [
-        { top: "25%", left: "30%", width: "15%", height: "8%" },
-        { top: "40%", left: "20%", width: "12%", height: "10%" },
-        { top: "42%", left: "68%", width: "10%", height: "8%" },
-        { top: "55%", left: "42%", width: "8%", height: "6%" },
-      ],
-      pores: [
-        { top: "45%", left: "40%", width: "20%", height: "15%" },
-        { top: "38%", left: "25%", width: "15%", height: "12%" },
-        { top: "38%", left: "60%", width: "15%", height: "12%" },
-      ],
-      pigmentation: [
-        { top: "40%", left: "22%", width: "18%", height: "20%" },
-        { top: "40%", left: "60%", width: "18%", height: "20%" },
-        { top: "25%", left: "35%", width: "30%", height: "10%" },
-      ],
-      redness: [
-        { top: "42%", left: "24%", width: "16%", height: "18%" },
-        { top: "42%", left: "60%", width: "16%", height: "18%" },
-        { top: "48%", left: "42%", width: "16%", height: "12%" },
-      ],
-      sagging: [
-        { top: "52%", left: "35%", width: "12%", height: "12%" },
-        { top: "52%", left: "53%", width: "12%", height: "12%" },
-        { top: "62%", left: "38%", width: "10%", height: "12%" },
-        { top: "62%", left: "50%", width: "10%", height: "12%" },
-      ],
-      dark_circles: [
-        { top: "38%", left: "30%", width: "16%", height: "10%" },
-        { top: "38%", left: "54%", width: "16%", height: "10%" },
-      ],
-      lines: [
-        { top: "22%", left: "35%", width: "30%", height: "5%" },
-        { top: "52%", left: "35%", width: "12%", height: "8%" },
-        { top: "52%", left: "53%", width: "12%", height: "8%" },
-        { top: "36%", left: "32%", width: "8%", height: "4%" },
-        { top: "36%", left: "60%", width: "8%", height: "4%" },
-      ],
-    };
-
-    const areas =
-      overlays[selectedMetric as Exclude<MetricHighlight, "none">] || [];
-    const color = getHighlightColor(selectedMetric);
-
-    return areas.map((area, idx) => (
-      <div
-        key={idx}
-        className="absolute rounded-full animate-pulse"
-        style={{
-          top: area.top,
-          left: area.left,
-          width: area.width,
-          height: area.height,
-          backgroundColor: color,
-          border: `2px solid ${color.replace("0.35", "0.8")}`,
-          boxShadow: `0 0 20px ${color}`,
-          pointerEvents: "none",
-        }}
-      />
-    ));
-  };
+  // ¿Tenemos máscara real para la métrica seleccionada?
+  const hasMaskForSelected =
+    (isLinesMetric && !!hautLinesMaskUrl) ||
+    (isPoresMetric && !!hautPoresMaskUrl) ||
+    (isPigmentationMetric && !!hautPigmentationMaskUrl) ||
+    (isAcneMetric && !!hautAcneMaskUrl) ||
+    (isRednessMetric && !!hautRednessMaskUrl) ||
+    (isSaggingMetric && !!hautSaggingMaskUrl) ||
+    (isDarkCirclesMetric && !!hautDarkCirclesMaskUrl);
 
   const selectedOption = METRIC_OPTIONS.find(
     (opt) => opt.value === selectedMetric
@@ -225,7 +139,7 @@ export function AnalyzedPhoto({
         </div>
       </div>
 
-      {/* Photo Container with Highlights */}
+      {/* Photo Container */}
       <div
         className="relative rounded-2xl overflow-hidden border-2 border-[#E5E5E5] bg-[#F5F5F5]"
         style={{ aspectRatio: "4 / 5" }} // mismo ratio que el modal
@@ -321,9 +235,7 @@ export function AnalyzedPhoto({
             }}
           />
         )}
-
-        {/* Overlays fake para el resto de métricas */}
-        {renderHighlightAreas()}
+        {/* ⛔️ Ya no hay overlays fake: si no hay máscara, solo se ve la foto limpia */}
       </div>
 
       {/* Timestamp */}
@@ -338,12 +250,21 @@ export function AnalyzedPhoto({
 
       {/* Info Text */}
       {selectedMetric !== "none" && (
-        <div className="mt-3 p-3 bg-[#FFF5F3] rounded-xl">
-          <p className="text-xs text-[#FF6B4A] font-['Manrope',sans-serif]">
-            ✨ Highlighted areas show detected{" "}
-            {selectedOption?.label.toLowerCase()} on your face
-          </p>
-        </div>
+        hasMaskForSelected ? (
+          <div className="mt-3 p-3 bg-[#FFF5F3] rounded-xl">
+            <p className="text-xs text-[#FF6B4A] font-['Manrope',sans-serif]">
+              ✨ Highlighted areas show detected{" "}
+              {selectedOption?.label.toLowerCase()} on your face.
+            </p>
+          </div>
+        ) : (
+          <div className="mt-3 p-3 bg-[#EFF6FF] rounded-xl border border-[#BFDBFE]">
+            <p className="text-xs text-[#1D4ED8] font-['Manrope',sans-serif]">
+              ✅ No visible concerns were detected for{" "}
+              {selectedOption?.label.toLowerCase()} in your latest analysis.
+            </p>
+          </div>
+        )
       )}
     </div>
   );
