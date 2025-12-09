@@ -10,6 +10,7 @@ import bloomLogo from "../assets/73a8a80abf64277705c5d856c147464ec33b1a04.png";
 import exampleImage from "../assets/dab1c1df3e9d3b8d3a4ac9926dcfb3acb1003b4a.png";
 import { AnalyzingScreen } from "./AnalyzingScreen";
 import { exportElementToPdf } from "../utils/exportToPdf";
+import { fakeBackend } from "../services/fakeBackend";
 
 import {
   skinMetrics as staticSkinMetrics,
@@ -110,6 +111,9 @@ export function WebResultsScreen({
   const [metricMasks, setMetricMasks] = useState<
     Record<string, string | undefined>
   >({});
+
+  // flag para no guardar dos veces el mismo análisis
+  const hasPersistedRef = useRef(false);
 
   // ---- OpenAI Routine state ----
   const [routine, setRoutine] = useState<BloomRoutineResponse | null>(null);
@@ -330,6 +334,49 @@ export function WebResultsScreen({
       .replace(/\b\w/g, (c) => c.toUpperCase());
   };
 
+// ============================
+// 4A) Guardar SIEMPRE el último análisis (overwrite)
+//      -> para que el Progress lea los datos buenos
+// ============================
+useEffect(() => {
+  if (!hautResult) return;
+  if (!displayMetrics || displayMetrics.length === 0) return;
+  if (!dynamicOverallHealth) return;
+
+  try {
+    // Usamos las mismas keys que el dashboard
+    localStorage.setItem(
+      "bloom_last_scan_metrics",
+      JSON.stringify(displayMetrics)
+    );
+
+    localStorage.setItem(
+      "bloom_last_overall_health",
+      JSON.stringify(dynamicOverallHealth)
+    );
+  } catch (err) {
+    console.error("[Bloom] Error saving last analysis to localStorage", err);
+  }
+}, [hautResult, displayMetrics, dynamicOverallHealth]);
+
+// ============================
+// 4B) Guardar UNA VEZ el scan en el histórico de fotos
+//      -> para Photo History
+// ============================
+useEffect(() => {
+  if (!hautResult) return;
+  if (!capturedImage) return;
+  if (hasPersistedRef.current) return; // solo una vez
+
+  try {
+    fakeBackend.saveScan(capturedImage, "camera");
+    hasPersistedRef.current = true;
+    console.log("[Bloom] Scan saved in fakeBackend history");
+  } catch (err) {
+    console.error("[Bloom] Error saving scan to fakeBackend", err);
+  }
+}, [hautResult, capturedImage]);
+
   // ============================
   // 4) Generar rutina con OpenAI (backend /api/recommendations)
   // ============================
@@ -372,6 +419,17 @@ export function WebResultsScreen({
         console.log("[Bloom Front] Routine received:", data);
 
         setRoutine(data);
+        // 🔹 Guardamos la rutina del último scan para que el dashboard la use
+try {
+  localStorage.setItem("bloom_last_routine_v1", JSON.stringify(data));
+  localStorage.setItem(
+    "bloom_last_routine_created_at_v1",
+    new Date().toISOString()
+  );
+  console.log("[Bloom] Last routine persisted to localStorage");
+} catch (err) {
+  console.error("[Bloom] Error saving last routine", err);
+}
       } catch (error: any) {
         if (error.name === "AbortError") return;
         console.error("[Bloom Front] Error fetching routine", error);
@@ -420,7 +478,7 @@ export function WebResultsScreen({
           </p>
           <Button
             type="button"
-            className="w-full h-11 bg-[#111827] text-white font-['Manrope',sans-serif]"
+            className="w-full h-11 bg-[#111827] text.white font-['Manrope',sans-serif]"
             onClick={() => {
               window.location.href = "/";
             }}

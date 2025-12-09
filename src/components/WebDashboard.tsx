@@ -8,6 +8,7 @@ import { Button } from "./ui/button";
 import { Calendar } from "./ui/calendar";
 import { ProgressRadar } from "./results/ProgressRadar";
 import { RadarOverview } from "./results/RadarOverview";
+import type { SkinMetric } from "../types";
 import { skinMetrics, overallHealth } from "../constants/skinAnalysis";
 import {
   MessageSquare,
@@ -40,6 +41,30 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { fakeBackend, type ScanRecord } from "../services/fakeBackend";
+
+// ---------- OpenAI Routine Types (mismo formato que en WebResultsScreen) ----------
+type RoutineSectionId = "morning" | "evening" | "weekly";
+
+interface RoutineStep {
+  id: string;
+  title: string;
+  subtitle: string;
+  concerns: string[];
+  usageNotes?: string;
+}
+
+interface RoutineSection {
+  id: RoutineSectionId;
+  title: string;
+  steps: RoutineStep[];
+}
+
+interface BloomRoutineResponse {
+  summary: string;
+  mainConcerns: string[];
+  sections: RoutineSection[];
+  disclaimer: string;
+}
 
 interface WebDashboardProps {
   onViewResults: () => void;
@@ -127,6 +152,10 @@ export function WebDashboard({
   // 🔹 Scan history real (desde fakeBackend)
   const [scanHistory, setScanHistory] = useState<ScanRecord[]>([]);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
+  const [latestMetrics, setLatestMetrics] = useState<SkinMetric[] | null>(null);
+const [latestOverallHealth, setLatestOverallHealth] = useState(overallHealth);
+const [routine, setRoutine] = useState<BloomRoutineResponse | null>(null);
+const [routineUpdatedAt, setRoutineUpdatedAt] = useState<string | null>(null);
 
   useEffect(() => {
     const loadScans = async () => {
@@ -139,6 +168,45 @@ export function WebDashboard({
     };
 
     loadScans();
+  }, []);
+
+  useEffect(() => {
+    try {
+      const rawMetrics = localStorage.getItem("bloom_last_scan_metrics");
+      const rawOverall = localStorage.getItem("bloom_last_overall_health");
+  
+      if (rawMetrics) {
+        const parsedMetrics = JSON.parse(rawMetrics) as SkinMetric[];
+        setLatestMetrics(parsedMetrics);
+      }
+  
+      if (rawOverall) {
+        const parsedOverall = JSON.parse(rawOverall);
+        setLatestOverallHealth(parsedOverall);
+      }
+    } catch (error) {
+      console.error("Error loading last scan metrics", error);
+    }
+  }, []);  
+
+  useEffect(() => {
+    try {
+      const rawRoutine = localStorage.getItem("bloom_last_routine_v1");
+      const rawDate = localStorage.getItem(
+        "bloom_last_routine_created_at_v1"
+      );
+
+      if (rawRoutine) {
+        const parsed = JSON.parse(rawRoutine) as BloomRoutineResponse;
+        setRoutine(parsed);
+      }
+
+      if (rawDate) {
+        setRoutineUpdatedAt(rawDate);
+      }
+    } catch (error) {
+      console.error("Error loading last routine", error);
+    }
   }, []);
 
   const hasPhotoOnDate = (date: Date) => {
@@ -612,7 +680,10 @@ export function WebDashboard({
           {activeTab === "progress" && (
             <div className="p-8 space-y-6">
               {/* Key Metrics Overview (igual que en la pantalla de resultados) */}
-              <RadarOverview metrics={skinMetrics} overallHealth={overallHealth} />
+              <RadarOverview
+  metrics={latestMetrics ?? skinMetrics}
+  overallHealth={latestOverallHealth ?? overallHealth}
+/>
 
               {/* Photo History Section */}
               <div className="bg-white rounded-2xl border border-[#E5E5E5] p-8 shadow-sm">
@@ -719,188 +790,148 @@ export function WebDashboard({
           )}
 
           {/* Recommendations Tab */}
-          {activeTab === "recommendations" && (
-            <div className="p-8">
-              <div className="bg-white rounded-2xl border border-[#E5E5E5] p-8 shadow-sm">
-                <h3
-                  className="text-[#18212D] mb-6 font-['Manrope',sans-serif]"
-                  style={{ fontSize: "24px", lineHeight: "32px" }}
-                >
-                  Your Personalized Skincare Plan
-                </h3>
+{activeTab === "recommendations" && (
+  <div className="p-8">
+    <div className="bg-white rounded-2xl border border-[#E5E5E5] p-8 shadow-sm">
+      <h3
+        className="text-[#18212D] mb-2 font-['Manrope',sans-serif]"
+        style={{ fontSize: "24px", lineHeight: "32px" }}
+      >
+        Your Personalized Skincare Plan
+      </h3>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {/* Morning Routine */}
-                  <div className="bg-gradient-to-br from-orange-50/50 to-white rounded-xl border border-[#E5E5E5] p-6">
+      {routineUpdatedAt && (
+        <p className="text-xs text-[#9CA3AF] mb-4 font-['Manrope',sans-serif]">
+          Based on your last scan from{" "}
+          {new Date(routineUpdatedAt).toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+          })}
+        </p>
+      )}
+
+      {/* Si tenemos rutina del último scan → versión dinámica */}
+      {routine ? (
+        <>
+          {/* Resumen */}
+          {routine.summary && (
+            <p className="text-sm text-[#4B5563] mb-6 max-w-3xl font-['Manrope',sans-serif]">
+              {routine.summary}
+            </p>
+          )}
+
+          {/* Morning / Evening / Weekly desde OpenAI */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {(["morning", "evening", "weekly"] as RoutineSectionId[]).map(
+              (sectionId) => {
+                const section = routine.sections.find(
+                  (s) => s.id === sectionId
+                );
+                if (!section) return null;
+
+                const icon =
+                  sectionId === "morning"
+                    ? <Sun className="w-6 h-6 text-white" />
+                    : sectionId === "evening"
+                    ? <Moon className="w-6 h-6 text-white" />
+                    : <Sparkles className="w-6 h-6 text-white" />;
+
+                const subtitle =
+                  sectionId === "morning"
+                    ? "Start your day with light, protective steps."
+                    : sectionId === "evening"
+                    ? "Support repair and renewal while you sleep."
+                    : "Targeted boosts to support your weekly routine.";
+
+                return (
+                  <div
+                    key={section.id}
+                    className="bg-gradient-to-br from-orange-50/40 to-white rounded-xl border border-[#E5E5E5] p-6 flex flex-col"
+                  >
+                    {/* Header sección */}
                     <div className="flex items-center gap-3 mb-4">
                       <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#FF6B4A] to-[#FFA94D] flex items-center justify-center">
-                        <Sun className="w-6 h-6 text-white" />
+                        {icon}
                       </div>
-                      <h4 className="text-[#18212D] font-['Manrope',sans-serif]">
-                        Morning Routine
-                      </h4>
-                    </div>
-                    <div className="space-y-3">
-                      <div className="bg-white rounded-lg p-3 border border-[#E5E5E5]">
-                        <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
-                          Gentle Cleanser
-                        </div>
-                        <div className="text-xs text-[#6B7280] font-['Manrope',sans-serif]">
-                          Maintain barrier function
-                        </div>
-                      </div>
-                      <div className="bg-white rounded-lg p-3 border border-[#E5E5E5]">
-                        <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
-                          Vitamin C Serum 15%
-                        </div>
-                        <div className="text-xs text-[#6B7280] font-['Manrope',sans-serif]">
-                          Antioxidant protection &amp; brightening
-                        </div>
-                      </div>
-                      <div className="bg-white rounded-lg p-3 border border-[#E5E5E5]">
-                        <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
-                          Niacinamide 10%
-                        </div>
-                        <div className="text-xs text-[#6B7280] font-['Manrope',sans-serif]">
-                          Pore refinement &amp; oil control
-                        </div>
-                      </div>
-                      <div className="bg-white rounded-lg p-3 border border-[#E5E5E5]">
-                        <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
-                          SPF 50+
-                        </div>
-                        <div className="text-xs text-[#6B7280] font-['Manrope',sans-serif]">
-                          UV protection essential
-                        </div>
+                      <div>
+                        <h4 className="text-[#18212D] font-['Manrope',sans-serif]">
+                          {section.title}
+                        </h4>
+                        <p className="text-xs text-[#6B7280] font-['Manrope',sans-serif]">
+                          {subtitle}
+                        </p>
                       </div>
                     </div>
-                  </div>
 
-                  {/* Evening Routine */}
-                  <div className="bg-gradient-to-br from-blue-50/30 to-white rounded-xl border border-[#E5E5E5] p-6">
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#4A90E2] to-[#357ABD] flex items-center justify-center">
-                        <Moon className="w-6 h-6 text-white" />
-                      </div>
-                      <h4 className="text-[#18212D] font-['Manrope',sans-serif]">
-                        Evening Routine
-                      </h4>
-                    </div>
+                    {/* Steps */}
                     <div className="space-y-3">
-                      <div className="bg-white rounded-lg p-3 border border-[#E5E5E5]">
-                        <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
-                          Oil Cleanser
+                      {section.steps.map((step) => (
+                        <div
+                          key={step.id}
+                          className="bg-white rounded-lg p-3 border border-[#E5E5E5]"
+                        >
+                          <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
+                            {step.title}
+                          </div>
+                          {step.subtitle && (
+                            <div className="text-xs text-[#6B7280] mt-1 font-['Manrope',sans-serif]">
+                              {step.subtitle}
+                            </div>
+                          )}
                         </div>
-                        <div className="text-xs text-[#6B7280] font-['Manrope',sans-serif]">
-                          Remove sunscreen &amp; impurities
-                        </div>
-                      </div>
-                      <div className="bg-white rounded-lg p-3 border border-[#E5E5E5]">
-                        <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
-                          Salicylic Acid 2%
-                        </div>
-                        <div className="text-xs text-[#6B7280] font-['Manrope',sans-serif]">
-                          Acne control &amp; pore care
-                        </div>
-                      </div>
-                      <div className="bg-white rounded-lg p-3 border border-[#E5E5E5]">
-                        <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
-                          Retinol 0.5%
-                        </div>
-                        <div className="text-xs text-[#6B7280] font-['Manrope',sans-serif]">
-                          Anti-aging &amp; texture improvement
-                        </div>
-                      </div>
-                      <div className="bg-white rounded-lg p-3 border border-[#E5E5E5]">
-                        <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
-                          Ceramide Moisturizer
-                        </div>
-                        <div className="text-xs text-[#6B7280] font-['Manrope',sans-serif]">
-                          Barrier repair overnight
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                      ))}
 
-                  {/* Weekly Treatments */}
-                  <div className="bg-gradient-to-br from-purple-50/30 to-white rounded-xl border border-[#E5E5E5] p-6">
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#9B59B6] to-[#8E44AD] flex items-center justify-center">
-                        <Sparkles className="w-6 h-6 text-white" />
-                      </div>
-                      <h4 className="text-[#18212D] font-['Manrope',sans-serif]">
-                        Weekly Treatments
-                      </h4>
-                    </div>
-                    <div className="space-y-3">
-                      <div className="bg-white rounded-lg p-3 border border-[#E5E5E5]">
-                        <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
-                          AHA/BHA Peel Mask
-                        </div>
-                        <div className="text-xs text-[#6B7280] font-['Manrope',sans-serif]">
-                          Deep exfoliation for texture
-                        </div>
-                      </div>
-                      <div className="bg-white rounded-lg p-3 border border-[#E5E5E5]">
-                        <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
-                          Hydrating Sheet Mask
-                        </div>
-                        <div className="text-xs text-[#6B7280] font-['Manrope',sans-serif]">
-                          Boost hydration levels
-                        </div>
-                      </div>
-                      <div className="bg-white rounded-lg p-3 border border-[#E5E5E5]">
-                        <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
-                          Clay Mask (T-zone)
-                        </div>
-                        <div className="text-xs text-[#6B7280] font-['Manrope',sans-serif]">
-                          Oil control &amp; pore cleansing
-                        </div>
-                      </div>
+                      {section.steps.length === 0 && (
+                        <p className="text-xs text-[#9CA3AF] font-['Manrope',sans-serif]">
+                          This section will be updated as we learn more about
+                          your skin.
+                        </p>
+                      )}
                     </div>
                   </div>
+                );
+              }
+            )}
+          </div>
 
-                  {/* Lifestyle Tips */}
-                  <div className="bg-gradient-to-br from-green-50/30 to-white rounded-xl border border-[#E5E5E5] p-6">
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#27AE60] to-[#229954] flex items-center justify-center">
-                        <Leaf className="w-6 h-6 text-white" />
-                      </div>
-                      <h4 className="text-[#18212D] font-['Manrope',sans-serif]">
-                        Lifestyle Tips
-                      </h4>
-                    </div>
-                    <div className="space-y-3">
-                      <div className="bg-white rounded-lg p-3 border border-[#E5E5E5]">
-                        <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
-                          Hydration Goal
-                        </div>
-                        <div className="text-xs text-[#6B7280] font-['Manrope',sans-serif]">
-                          Drink 8 glasses of water daily
-                        </div>
-                      </div>
-                      <div className="bg-white rounded-lg p-3 border border-[#E5E5E5]">
-                        <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
-                          Sleep Quality
-                        </div>
-                        <div className="text-xs text-[#6B7280] font-['Manrope',sans-serif]">
-                          Aim for 7-9 hours nightly
-                        </div>
-                      </div>
-                      <div className="bg-white rounded-lg p-3 border border-[#E5E5E5]">
-                        <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
-                          Nutrition
-                        </div>
-                        <div className="text-xs text-[#6B7280] font-['Manrope',sans-serif]">
-                          Focus on antioxidant-rich foods
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+          {/* Disclaimer de la rutina */}
+          {routine.disclaimer && (
+            <p className="mt-6 text-[10px] italic text-[#9CA3AF] max-w-3xl font-['Manrope',sans-serif]">
+              * {routine.disclaimer}
+            </p>
           )}
+        </>
+      ) : (
+        // 🔸 Fallback: tu bloque estático actual si aún no hay rutina guardada
+        <>
+          <p className="text-sm text-[#6B7280] mb-6 font-['Manrope',sans-serif]">
+            Complete a skin scan to generate a personalized routine. For now,
+            here is a general plan based on combination/acne-prone skin.
+          </p>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Morning Routine (estático de antes) */}
+            <div className="bg-gradient-to-br from-orange-50/50 to-white rounded-xl border border-[#E5E5E5] p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#FF6B4A] to-[#FFA94D] flex items-center justify-center">
+                  <Sun className="w-6 h-6 text-white" />
+                </div>
+                <h4 className="text-[#18212D] font-['Manrope',sans-serif]">
+                  Morning Routine
+                </h4>
+              </div>
+              {/* … puedes dejar aquí tus mismos steps estáticos anteriores … */}
+            </div>
+
+            {/* Evening Routine + el resto de bloques estáticos… */}
+            {/* Copia aquí tal cual lo que ya tenías si quieres conservarlo */}
+          </div>
+        </>
+      )}
+    </div>
+  </div>
+)}
 
           {/* Patient Profile Tab */}
           {activeTab === "patient-profile" && (

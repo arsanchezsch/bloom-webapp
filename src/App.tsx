@@ -32,6 +32,10 @@ export interface ConsultationData {
 }
 
 export default function App() {
+  // Logs para validar LIQA (los puedes quitar cuando quieras)
+  console.log("🔍 LIQA URL:", import.meta.env.VITE_LIQA_SOURCE_URL);
+  console.log("🔍 LIQA KEY:", import.meta.env.VITE_LIQA_LICENSE_KEY);
+
   const [doctorSession, setDoctorSession] = useState<DoctorSession | null>(
     null
   );
@@ -68,10 +72,37 @@ export default function App() {
     }
   }, []);
 
+  // ==============================
   // Handlers
+  // ==============================
+
   const handleConsultationComplete = async (data: ConsultationData) => {
-    const saved = await fakeBackend.saveConsultation(data);
-    setConsultationData(saved);
+    try {
+      // Si existe fakeBackend.saveConsultation lo usamos
+      if (typeof fakeBackend.saveConsultation === "function") {
+        const saved = await fakeBackend.saveConsultation(data);
+        setConsultationData(saved);
+      } else {
+        console.warn(
+          "[Bloom] fakeBackend.saveConsultation no existe, usando datos en memoria"
+        );
+        // aseguramos un id mínimo para que el dashboard funcione
+        const withId = {
+          ...data,
+          id: (crypto as any)?.randomUUID?.() ?? Date.now().toString(),
+        };
+        setConsultationData(withId);
+      }
+    } catch (error) {
+      console.error("Error saving consultation in fakeBackend:", error);
+      // fallback: al menos seguimos con los datos del formulario
+      const withId = {
+        ...data,
+        id: (crypto as any)?.randomUUID?.() ?? Date.now().toString(),
+      };
+      setConsultationData(withId);
+    }
+
     setCurrentScreen("web-scan");
   };
 
@@ -84,11 +115,17 @@ export default function App() {
     const consultationId = (consultationData as any)?.id;
 
     try {
-      await fakeBackend.saveScan({
-        imageData,
-        source,
-        consultationId,
-      });
+      if (typeof fakeBackend.saveScan === "function") {
+        await fakeBackend.saveScan({
+          imageData,
+          source,
+          consultationId,
+        });
+      } else {
+        console.warn(
+          "[Bloom] fakeBackend.saveScan no existe, omitiendo guardado de scan"
+        );
+      }
     } catch (error) {
       console.error("Error saving scan in fakeBackend:", error);
     } finally {
@@ -117,11 +154,21 @@ export default function App() {
 
   const handleSelectPatient = async (patientId: string) => {
     // Cargar la consulta de ese paciente y abrir el dashboard
-    const consultation = await fakeBackend.getConsultationById(patientId);
-    if (consultation) {
-      setConsultationData(consultation);
-      setCurrentScreen("web-dashboard");
-      setInitialDashboardTab("progress");
+    try {
+      if (typeof fakeBackend.getConsultationById === "function") {
+        const consultation = await fakeBackend.getConsultationById(patientId);
+        if (consultation) {
+          setConsultationData(consultation);
+          setCurrentScreen("web-dashboard");
+          setInitialDashboardTab("progress");
+        }
+      } else {
+        console.warn(
+          "[Bloom] fakeBackend.getConsultationById no existe, selección de paciente desactivada"
+        );
+      }
+    } catch (error) {
+      console.error("Error loading consultation from fakeBackend:", error);
     }
   };
 

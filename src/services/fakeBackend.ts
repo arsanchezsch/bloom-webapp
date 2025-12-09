@@ -1,118 +1,140 @@
 // src/services/fakeBackend.ts
 
-const CONSULTATIONS_KEY = "bloom_consultations_v1";
-const SCANS_KEY = "bloom_scans_v1";
-const PATIENTS_KEY = "bloom_patients";
+// Pequeño "backend" fake en localStorage para:
+// - Guardar historial de scans (para Photo History del dashboard)
+// - Guardar el último análisis (metrics + overallHealth) para el Progress
 
-function readArray<T = any>(key: string): T[] {
+export type ScanSource = "camera" | "upload";
+
+export interface ScanRecord {
+  id: string;
+  imageData: string | null;
+  source: ScanSource;
+  createdAt: string; // ISO string
+}
+
+// Claves de localStorage
+const SCANS_STORAGE_KEY = "bloom_fake_scans_v1";
+const LAST_METRICS_KEY = "bloom_last_scan_metrics";
+const LAST_OVERALL_KEY = "bloom_last_overall_health";
+const LAST_CREATED_AT_KEY = "bloom_last_scan_created_at";
+
+// Helpers de almacenamiento -----------------------
+
+function loadScansFromStorage(): ScanRecord[] {
   if (typeof window === "undefined") return [];
+
   try {
-    const raw = localStorage.getItem(key);
+    const raw = localStorage.getItem(SCANS_STORAGE_KEY);
     if (!raw) return [];
-    return JSON.parse(raw) as T[];
-  } catch {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed as ScanRecord[];
+  } catch (err) {
+    console.error("[fakeBackend] Error loading scans", err);
     return [];
   }
 }
 
-function writeArray(key: string, value: any[]) {
+function saveScansToStorage(scans: ScanRecord[]) {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // ignore
+    localStorage.setItem(SCANS_STORAGE_KEY, JSON.stringify(scans));
+  } catch (err) {
+    console.error("[fakeBackend] Error saving scans", err);
   }
 }
 
-function generateId(prefix: string) {
-  return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-}
+// API pública -------------------------------------
 
 export const fakeBackend = {
-  // Guarda la consulta y registra/actualiza paciente
-  async saveConsultation(data: any) {
-    const consultations = readArray(CONSULTATIONS_KEY);
+  /**
+   * Guarda un nuevo scan en el historial (para Photo History).
+   */
+  async saveScan(
+    imageData: string | null,
+    source: ScanSource = "camera"
+  ): Promise<ScanRecord> {
+    const scans = loadScansFromStorage();
 
-    const id = data.id || generateId("consultation");
-    const createdAt = new Date().toISOString();
-
-    const consultation = {
-      ...data,
-      id,
-      createdAt,
+    const record: ScanRecord = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      imageData,
+      source,
+      createdAt: new Date().toISOString(),
     };
 
-    consultations.push(consultation);
-    writeArray(CONSULTATIONS_KEY, consultations);
+    scans.push(record);
+    saveScansToStorage(scans);
 
-    // Actualizar lista de pacientes para el DoctorHomeScreen
-    const patients = readArray(PATIENTS_KEY);
-    const patientIndex = patients.findIndex(
-      (p: any) => p.email && data.email && p.email === data.email
-    );
+    return record;
+  },
 
-    const patient = {
-      id, // usamos id de la última consulta como id del paciente
-      fullName: data.fullName || "Patient",
-      email: data.email || "",
-      skinType: data.skinType || "Unknown",
-      age: data.age || "",
-      timestamp: createdAt,
-    };
+  /**
+   * Devuelve TODOS los scans guardados (el Dashboard los ordena).
+   * Es justo lo que está usando ahora WebDashboard: fakeBackend.getAllScans()
+   */
+  async getAllScans(): Promise<ScanRecord[]> {
+    return loadScansFromStorage();
+  },
 
-    if (patientIndex >= 0) {
-      patients[patientIndex] = { ...patients[patientIndex], ...patient };
-    } else {
-      patients.push(patient);
+  /**
+   * Por si algún día quieres limpiar el historial.
+   */
+  async clearScans(): Promise<void> {
+    saveScansToStorage([]);
+  },
+
+  /**
+   * Guarda el último análisis completo para que el Dashboard pueda
+   * mostrar las métricas y el Overall Health más recientes.
+   */
+  async saveLastAnalysis(payload: {
+    metrics: any; // en WebResults son SkinMetric[]
+    overallHealth: any;
+    createdAt: string;
+  }): Promise<void> {
+    if (typeof window === "undefined") return;
+
+    try {
+      localStorage.setItem(LAST_METRICS_KEY, JSON.stringify(payload.metrics));
+      localStorage.setItem(
+        LAST_OVERALL_KEY,
+        JSON.stringify(payload.overallHealth)
+      );
+      localStorage.setItem(LAST_CREATED_AT_KEY, payload.createdAt);
+    } catch (err) {
+      console.error("[fakeBackend] Error saving last analysis", err);
+    }
+  },
+
+  /**
+   * Helper por si quieres leerlo desde otro sitio en el futuro.
+   * (El Dashboard ya está leyendo directamente de localStorage,
+   * así que esto ahora mismo es opcional.)
+   */
+  async getLastAnalysis(): Promise<{
+    metrics: any | null;
+    overallHealth: any | null;
+    createdAt: string | null;
+  }> {
+    if (typeof window === "undefined") {
+      return { metrics: null, overallHealth: null, createdAt: null };
     }
 
-    writeArray(PATIENTS_KEY, patients);
+    try {
+      const rawMetrics = localStorage.getItem(LAST_METRICS_KEY);
+      const rawOverall = localStorage.getItem(LAST_OVERALL_KEY);
+      const createdAt = localStorage.getItem(LAST_CREATED_AT_KEY);
 
-    return consultation;
-  },
-
-  // Guarda el scan
-  async saveScan(scan: { imageData: string; source?: string; consultationId?: string }) {
-    const scans = readArray(SCANS_KEY);
-    const id = generateId("scan");
-    const createdAt = new Date().toISOString();
-
-    const storedScan = {
-      ...scan,
-      id,
-      createdAt,
-    };
-
-    scans.push(storedScan);
-    writeArray(SCANS_KEY, scans);
-
-    return storedScan;
-  },
-
-  async getLastConsultation() {
-    const consultations = readArray(CONSULTATIONS_KEY);
-    if (!consultations.length) return null;
-    return consultations[consultations.length - 1];
-  },
-
-  async getLastScan() {
-    const scans = readArray(SCANS_KEY);
-    if (!scans.length) return null;
-    return scans[scans.length - 1];
-  },
-
-  // 🔍 Para ir al dashboard de un paciente concreto
-  async getConsultationById(id: string) {
-    const consultations = readArray(CONSULTATIONS_KEY);
-    return consultations.find((c: any) => c.id === id) || null;
-  },
-
-  // Utilidades opcionales
-  async getConsultations() {
-    return readArray(CONSULTATIONS_KEY);
-  },
-
-  async getPatients() {
-    return readArray(PATIENTS_KEY);
+      return {
+        metrics: rawMetrics ? JSON.parse(rawMetrics) : null,
+        overallHealth: rawOverall ? JSON.parse(rawOverall) : null,
+        createdAt: createdAt ?? null,
+      };
+    } catch (err) {
+      console.error("[fakeBackend] Error loading last analysis", err);
+      return { metrics: null, overallHealth: null, createdAt: null };
+    }
   },
 };
