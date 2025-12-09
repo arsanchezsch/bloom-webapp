@@ -15,17 +15,28 @@ export const getScoreColor = (score: number): string => {
 
 /**
  * Returns Tailwind classes for status badge styling
- * @param status - Metric status string
- * @returns Tailwind CSS classes
+ * Status values expected: "Great" | "Good" | "Average" | "Bad"
  */
 export const getStatusBadge = (status: string): string => {
+  if (!status) return "";
+
+  const s = status.trim();
+
   const styles: Record<string, string> = {
-    "Needs Attention": "bg-[#FFE5DD] text-[#FF6B4A] border-[#FF6B4A]/20",
-    "Moderate": "bg-[#FFF4E5] text-[#FFA94D] border-[#FFA94D]/20",
-    "Good": "bg-[#D1FAE5] text-[#10B981] border-[#10B981]/20",
-    "Excellent": "bg-[#D1FAE5] text-[#10B981] border-[#10B981]/20",
+    // BAD → Rojo Bloom (#FF6B4A)
+    Bad: "bg-[#FFE5DD] text-[#FF6B4A] border border-[#FF6B4A]/20",
+
+    // AVERAGE → Naranja Bloom (#FFA94D)
+    Average: "bg-[#FFF4E5] text-[#FFA94D] border border-[#FFA94D]/20",
+
+    // GREAT → Verde original
+    Great: "bg-[#D1FAE5] text-[#10B981] border border-[#10B981]/20",
+
+    // GOOD → Mismo verde que GREAT
+    Good: "bg-[#D1FAE5] text-[#10B981] border border-[#10B981]/20",
   };
-  return styles[status] || styles["Good"];
+
+  return styles[s] || styles["Good"];
 };
 
 /**
@@ -34,10 +45,10 @@ export const getStatusBadge = (status: string): string => {
  * @returns Formatted date string
  */
 export const formatDate = (date: Date): string => {
-  return date.toLocaleDateString('en-US', { 
-    month: 'long', 
-    day: 'numeric', 
-    year: 'numeric' 
+  return date.toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
   });
 };
 
@@ -47,8 +58,8 @@ export const formatDate = (date: Date): string => {
  * @returns Formatted time string
  */
 export const formatTime = (date: Date): string => {
-  return date.toLocaleTimeString('en-US', { 
-    hour: '2-digit', 
-    minute: '2-digit' 
+  return date.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
   });
 };

@@ -1,12 +1,19 @@
 // src/App.tsx
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PersonalConsultation } from "./components/PersonalConsultation";
 import { WebSkinScan } from "./components/WebSkinScan";
 import { WebResultsScreen } from "./components/WebResultsScreen";
 import { WebDashboard } from "./components/WebDashboard";
 import { fakeBackend } from "./services/fakeBackend";
 
+import {
+  DoctorAuthScreen,
+  DoctorSession,
+} from "./components/DoctorAuthScreen";
+import { DoctorHomeScreen } from "./components/DoctorHomeScreen";
+
 type Screen =
+  | "doctor-home"
   | "web-consultation"
   | "web-scan"
   | "web-results"
@@ -25,42 +32,57 @@ export interface ConsultationData {
 }
 
 export default function App() {
-  // Detectar si estamos en la ruta /capture (para el flujo QR móvil)
+  const [doctorSession, setDoctorSession] = useState<DoctorSession | null>(
+    null
+  );
+  const [authReady, setAuthReady] = useState(false);
+
   const isCaptureRoute =
     typeof window !== "undefined" && window.location.pathname === "/capture";
 
-  // Si es /capture empezamos directamente en el escáner,
-  // si no, empezamos en la consulta normal
-  const initialScreen: Screen = isCaptureRoute
-    ? "web-scan"
-    : "web-consultation";
-
-  const [currentScreen, setCurrentScreen] = useState<Screen>(initialScreen);
+  const [currentScreen, setCurrentScreen] = useState<Screen>(
+    isCaptureRoute ? "web-scan" : "doctor-home"
+  );
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [consultationData, setConsultationData] =
     useState<ConsultationData | null>(null);
 
-  // Tab inicial del dashboard
   const [initialDashboardTab, setInitialDashboardTab] = useState<
-    "chat" | "progress" | "recommendations" | "profile"
+    "chat" | "progress" | "recommendations" | "patient-profile"
   >("chat");
 
-  // 🧍 Guardamos la consulta en el backend falso
+  // Leer sesión del doctor
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("bloom_doctor_session_v2");
+      if (stored) {
+        const parsed = JSON.parse(stored) as DoctorSession;
+        if (parsed?.email) {
+          setDoctorSession(parsed);
+        }
+      }
+    } catch (err) {
+      console.error("Error reading doctor session:", err);
+    } finally {
+      setAuthReady(true);
+    }
+  }, []);
+
+  // Handlers
   const handleConsultationComplete = async (data: ConsultationData) => {
     const saved = await fakeBackend.saveConsultation(data);
     setConsultationData(saved);
     setCurrentScreen("web-scan");
   };
 
-  // 📸 Guardamos el scan en el backend falso
   const handleScanComplete = async (
     imageData: string,
     source: "camera" | "upload" = "upload"
   ) => {
     setCapturedImage(imageData);
-  
+
     const consultationId = (consultationData as any)?.id;
-  
+
     try {
       await fakeBackend.saveScan({
         imageData,
@@ -68,16 +90,19 @@ export default function App() {
         consultationId,
       });
     } catch (error) {
-      // Si algo falla guardando (por ej. localStorage en móvil),
-      // no bloqueamos el flujo. Solo lo ignoramos silenciosamente.
       console.error("Error saving scan in fakeBackend:", error);
     } finally {
-      // Pase lo que pase, seguimos al resultado
       setCurrentScreen("web-results");
     }
-  };  
+  };
 
-  const handleViewDashboard = (initialTab = "chat") => {
+  const handleViewDashboard = (
+    initialTab:
+      | "chat"
+      | "progress"
+      | "recommendations"
+      | "patient-profile" = "chat"
+  ) => {
     setCurrentScreen("web-dashboard");
     setInitialDashboardTab(initialTab);
   };
@@ -86,8 +111,59 @@ export default function App() {
     setCurrentScreen("web-results");
   };
 
-  // Render según pantalla
+  const handleStartConsultation = () => {
+    setCurrentScreen("web-consultation");
+  };
+
+  const handleSelectPatient = async (patientId: string) => {
+    // Cargar la consulta de ese paciente y abrir el dashboard
+    const consultation = await fakeBackend.getConsultationById(patientId);
+    if (consultation) {
+      setConsultationData(consultation);
+      setCurrentScreen("web-dashboard");
+      setInitialDashboardTab("progress");
+    }
+  };
+
+  const handleDoctorLogout = () => {
+    try {
+      localStorage.removeItem("bloom_doctor_session_v2");
+    } catch {
+      // ignore
+    }
+    setDoctorSession(null);
+    setConsultationData(null);
+    setCapturedImage(null);
+    setCurrentScreen("doctor-home");
+  };
+
+  // =============== AUTH ===============
+  if (!authReady) {
+    return null;
+  }
+
+  if (!doctorSession) {
+    return (
+      <DoctorAuthScreen
+        onAuthenticated={(session) => {
+          setDoctorSession(session);
+          setCurrentScreen("doctor-home");
+        }}
+      />
+    );
+  }
+
+  // ============== NAV ==============
   switch (currentScreen) {
+    case "doctor-home":
+      return (
+        <DoctorHomeScreen
+          onNewConsultation={handleStartConsultation}
+          onSelectPatient={handleSelectPatient}
+          onLogout={handleDoctorLogout}
+        />
+      );
+
     case "web-consultation":
       return (
         <PersonalConsultation onComplete={handleConsultationComplete} />
@@ -97,7 +173,6 @@ export default function App() {
       return (
         <WebSkinScan
           onComplete={handleScanComplete}
-          // 👇 Si venimos de /capture (QR), abrimos la cámara directamente
           forceCameraMode={isCaptureRoute}
         />
       );
@@ -106,7 +181,6 @@ export default function App() {
       return (
         <WebResultsScreen
           capturedImage={capturedImage}
-          // Al ir al dashboard desde resultados, abrimos directamente la pestaña de progreso
           onViewDashboard={() => handleViewDashboard("progress")}
         />
       );
@@ -117,6 +191,8 @@ export default function App() {
           onViewResults={handleViewResults}
           userInfo={consultationData ?? undefined}
           initialTab={initialDashboardTab}
+          onBackToHome={() => setCurrentScreen("doctor-home")}
+          onTakeNewScan={() => setCurrentScreen("web-scan")}
         />
       );
 

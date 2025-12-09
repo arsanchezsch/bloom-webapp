@@ -44,10 +44,13 @@ import { fakeBackend, type ScanRecord } from "../services/fakeBackend";
 interface WebDashboardProps {
   onViewResults: () => void;
   userInfo?: Record<string, any>;
-  initialTab?: "chat" | "progress" | "recommendations" | "profile";
+  initialTab?: "progress" | "chat" | "recommendations" | "patient-profile";
+  onLogout?: () => void;
+  onBackToHome?: () => void;
+  onTakeNewScan?: () => void;
 }
 
-type TabType = "chat" | "progress" | "recommendations" | "profile";
+type TabType = "progress" | "chat" | "recommendations" | "patient-profile";
 
 // Mock data for progress tracking (por ahora)
 const progressData = [
@@ -83,12 +86,43 @@ const suggestedQuestions = [
   "How often should I exfoliate?",
 ];
 
-export function WebDashboard({ onViewResults, userInfo, initialTab = "chat" }: WebDashboardProps) {
+export function WebDashboard({
+  onViewResults,
+  userInfo,
+  initialTab = "progress",
+  onBackToHome,
+  onTakeNewScan,
+}: WebDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>(initialTab);
   const [messages, setMessages] = useState(initialMessages);
   const [inputValue, setInputValue] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const profilePhotoInputRef = useRef<HTMLInputElement>(null);
+
+  const [showDoctorModal, setShowDoctorModal] = useState(false);
+
+  // 🔹 Doctor info (intentamos leer de auth/session)
+  const [doctorInfo, setDoctorInfo] = useState<{ fullName: string; email: string }>({
+    fullName: "Doctor",
+    email: "",
+  });
+
+  useEffect(() => {
+    try {
+      const raw =
+        localStorage.getItem("bloom_doctor_auth") ||
+        localStorage.getItem("bloom_doctor_session_v2");
+      if (raw) {
+        const data = JSON.parse(raw);
+        setDoctorInfo({
+          fullName: data.fullName || data.name || "Doctor",
+          email: data.email || "",
+        });
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
 
   // 🔹 Scan history real (desde fakeBackend)
   const [scanHistory, setScanHistory] = useState<ScanRecord[]>([]);
@@ -117,25 +151,134 @@ export function WebDashboard({ onViewResults, userInfo, initialTab = "chat" }: W
   // Profile state (coming from initial consultation when available)
   const initialName = userInfo?.fullName || "Bloom User";
   const initialEmail = userInfo?.email || "user@example.com";
-
-  const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
-  const [userName, setUserName] = useState(initialName);
-  const [userEmail, setUserEmail] = useState(initialEmail);
-  const [isEditingName, setIsEditingName] = useState(false);
-  const [isEditingEmail, setIsEditingEmail] = useState(false);
-  const [tempName, setTempName] = useState(initialName);
-  const [tempEmail, setTempEmail] = useState(initialEmail);
+  const initialAge = (userInfo?.age as string) || "28";
 
   // User info from initial questionnaire
   const userQuestionnaire = {
     skinType: userInfo?.skinType || "Combination",
-    age: userInfo?.age || "28",
-    concerns: userInfo?.skinConcerns || ["Acne", "Large Pores", "Oily T-zone"],
+    age: initialAge,
+    concerns: userInfo?.skinConcerns || ["Acne", "Large pores", "Oily T-zone"],
     allergies: userInfo?.medicalHistory || "None reported",
     currentProducts:
       userInfo?.currentProducts || "Basic cleanser and moisturizer",
     sunExposure: "Not specified",
     joinDate: "Today",
+  };
+
+  const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
+  const [userName, setUserName] = useState(initialName);
+  const [userEmail, setUserEmail] = useState(initialEmail);
+  const [userAge, setUserAge] = useState(initialAge);
+
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [isEditingEmail, setIsEditingEmail] = useState(false);
+  const [isEditingAge, setIsEditingAge] = useState(false);
+
+  const [tempName, setTempName] = useState(initialName);
+  const [tempEmail, setTempEmail] = useState(initialEmail);
+  const [tempAge, setTempAge] = useState(initialAge);
+
+  // Doctor comments (solo visibles para el doctor) + persistencia local
+  const doctorNotesStorageKey = userInfo?.id
+    ? `bloom_doctor_notes_${userInfo.id}`
+    : "bloom_doctor_notes_default";
+
+  const [doctorNotes, setDoctorNotes] = useState("");
+  const [isSavingNotes, setIsSavingNotes] = useState(false);
+  const [notesSavedAt, setNotesSavedAt] = useState<Date | null>(null);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(doctorNotesStorageKey);
+      if (saved) {
+        setDoctorNotes(saved);
+      }
+    } catch {
+      // ignore
+    }
+  }, [doctorNotesStorageKey]);
+
+  const handleSaveDoctorNotes = () => {
+    try {
+      setIsSavingNotes(true);
+      localStorage.setItem(doctorNotesStorageKey, doctorNotes);
+      setNotesSavedAt(new Date());
+    } catch {
+      // ignore
+    } finally {
+      setIsSavingNotes(false);
+    }
+  };
+
+  // Editable skin profile state (from onboarding)
+  const [skinType, setSkinType] = useState(userQuestionnaire.skinType);
+  const [mainConcerns, setMainConcerns] = useState<string[]>(
+    userQuestionnaire.concerns
+  );
+  const [allergies, setAllergies] = useState(userQuestionnaire.allergies);
+  const [currentProducts, setCurrentProducts] = useState(
+    userQuestionnaire.currentProducts
+  );
+
+  const [isEditingSkinType, setIsEditingSkinType] = useState(false);
+  const [isEditingMainConcerns, setIsEditingMainConcerns] = useState(false);
+  const [isEditingAllergies, setIsEditingAllergies] = useState(false);
+  const [isEditingCurrentProducts, setIsEditingCurrentProducts] =
+    useState(false);
+
+  const [tempSkinType, setTempSkinType] = useState(userQuestionnaire.skinType);
+  const [tempMainConcerns, setTempMainConcerns] = useState(
+    userQuestionnaire.concerns.join(", ")
+  );
+  const [tempAllergies, setTempAllergies] = useState(
+    userQuestionnaire.allergies
+  );
+  const [tempCurrentProducts, setTempCurrentProducts] = useState(
+    userQuestionnaire.currentProducts
+  );
+
+  const handleSaveSkinType = () => {
+    setSkinType(tempSkinType);
+    setIsEditingSkinType(false);
+  };
+
+  const handleCancelSkinType = () => {
+    setTempSkinType(skinType);
+    setIsEditingSkinType(false);
+  };
+
+  const handleSaveMainConcerns = () => {
+    const list = tempMainConcerns
+      .split(",")
+      .map((c) => c.trim())
+      .filter(Boolean);
+    setMainConcerns(list);
+    setIsEditingMainConcerns(false);
+  };
+
+  const handleCancelMainConcerns = () => {
+    setTempMainConcerns(mainConcerns.join(", "));
+    setIsEditingMainConcerns(false);
+  };
+
+  const handleSaveAllergies = () => {
+    setAllergies(tempAllergies);
+    setIsEditingAllergies(false);
+  };
+
+  const handleCancelAllergies = () => {
+    setTempAllergies(allergies);
+    setIsEditingAllergies(false);
+  };
+
+  const handleSaveCurrentProducts = () => {
+    setCurrentProducts(tempCurrentProducts);
+    setIsEditingCurrentProducts(false);
+  };
+
+  const handleCancelCurrentProducts = () => {
+    setTempCurrentProducts(currentProducts);
+    setIsEditingCurrentProducts(false);
   };
 
   const handleSendMessage = (messageText?: string) => {
@@ -228,107 +371,103 @@ export function WebDashboard({ onViewResults, userInfo, initialTab = "chat" }: W
     setIsEditingEmail(false);
   };
 
+  const handleSaveAge = () => {
+    setUserAge(tempAge);
+    setIsEditingAge(false);
+  };
+
+  const handleCancelAge = () => {
+    setTempAge(userAge);
+    setIsEditingAge(false);
+  };
+
   return (
     <div className="min-h-screen bg-[#F5F5F5] flex">
       {/* Sidebar */}
       <div className="w-72 bg-white border-r border-[#E5E5E5] flex flex-col">
-        {/* Logo/Brand */}
-        <div className="p-6 border-b border-[#E5E5E5]">
-          <div className="flex items-center gap-3">
+        {/* Doctor Account (arriba a la izquierda) */}
+        <div className="p-4 border-b border-[#E5E5E5]">
+          <button
+            onClick={() => {
+              if (onBackToHome) onBackToHome();
+            }}
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-[#F5F5F5] transition-colors"
+          >
             <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#FF6B4A] to-[#FFA94D] flex items-center justify-center">
-              <Sparkles className="w-5 h-5 text-white" />
+              <User className="w-5 h-5 text-white" />
             </div>
-            <div>
-              <h1
-                className="text-[#18212D] font-['Manrope',sans-serif]"
-                style={{ fontSize: "20px", lineHeight: "28px" }}
-              >
-                Bloom
-              </h1>
-              <p className="text-xs text-[#6B7280] font-['Manrope',sans-serif]">
-                Skin Analysis
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Navigation */}<nav className="flex-1 p-4 space-y-2">
-  {/* PROGRESS FIRST */}
-  <button
-    onClick={() => setActiveTab("progress")}
-    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-['Manrope',sans-serif] ${
-      activeTab === "progress"
-        ? "bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] text-white shadow-lg"
-        : "text-[#6B7280] hover:bg-[#F5F5F5]"
-    }`}
-  >
-    <TrendingUp className="w-5 h-5" />
-    <span>Progress</span>
-  </button>
-
-  {/* CHAT SECOND */}
-  <button
-    onClick={() => setActiveTab("chat")}
-    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-['Manrope',sans-serif] ${
-      activeTab === "chat"
-        ? "bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] text-white shadow-lg"
-        : "text-[#6B7280] hover:bg-[#F5F5F5]"
-    }`}
-  >
-    <MessageSquare className="w-5 h-5" />
-    <span>AI Chat</span>
-  </button>
-
-  {/* RECOMMENDATIONS THIRD */}
-  <button
-    onClick={() => setActiveTab("recommendations")}
-    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-['Manrope',sans-serif] ${
-      activeTab === "recommendations"
-        ? "bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] text-white shadow-lg"
-        : "text-[#6B7280] hover:bg-[#F5F5F5]"
-    }`}
-  >
-    <Lightbulb className="w-5 h-5" />
-    <span>Recommendations</span>
-  </button>
-</nav>
-
-        {/* User Profile */}
-        <div className="p-4 border-t border-[#E5E5E5]">
-          <div className="flex items-center gap-3 px-3 py-2">
-            {profilePhoto ? (
-              <img
-                src={profilePhoto}
-                alt="Profile"
-                className="w-10 h-10 rounded-full object-cover"
-              />
-            ) : (
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#FF6B4A] to-[#FFA94D] flex items-center justify-center">
-                <User className="w-5 h-5 text-white" />
-              </div>
-            )}
-            <div className="flex-1">
+            <div className="flex-1 text-left">
               <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
-                {userName}
+                {doctorInfo.fullName || "Doctor"}
               </div>
               <div className="text-xs text-[#6B7280] font-['Manrope',sans-serif]">
-                Premium Member
+                Doctor Account
               </div>
             </div>
-            <button
-              onClick={() => setActiveTab("profile")}
-              className="text-[#6B7280] hover:text-[#18212D] transition-colors"
-            >
-              <Settings className="w-5 h-5" />
-            </button>
-          </div>
+            <Settings className="w-5 h-5 text-[#6B7280]" />
+          </button>
         </div>
+
+        {/* Navigation */}
+        <nav className="flex-1 p-4 space-y-2">
+          {/* PROGRESS FIRST */}
+          <button
+            onClick={() => setActiveTab("progress")}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-['Manrope',sans-serif] ${
+              activeTab === "progress"
+                ? "bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] text-white shadow-lg"
+                : "text-[#6B7280] hover:bg-[#F5F5F5]"
+            }`}
+          >
+            <TrendingUp className="w-5 h-5" />
+            <span>Progress</span>
+          </button>
+
+          {/* CHAT SECOND */}
+          <button
+            onClick={() => setActiveTab("chat")}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-['Manrope',sans-serif] ${
+              activeTab === "chat"
+                ? "bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] text-white shadow-lg"
+                : "text-[#6B7280] hover:bg-[#F5F5F5]"
+            }`}
+          >
+            <MessageSquare className="w-5 h-5" />
+            <span>AI Chat</span>
+          </button>
+
+          {/* RECOMMENDATIONS THIRD */}
+          <button
+            onClick={() => setActiveTab("recommendations")}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-['Manrope',sans-serif] ${
+              activeTab === "recommendations"
+                ? "bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] text-white shadow-lg"
+                : "text-[#6B7280] hover:bg-[#F5F5F5]"
+            }`}
+          >
+            <Lightbulb className="w-5 h-5" />
+            <span>Recommendations</span>
+          </button>
+
+          {/* PATIENT PROFILE FOURTH */}
+          <button
+            onClick={() => setActiveTab("patient-profile")}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-['Manrope',sans-serif] ${
+              activeTab === "patient-profile"
+                ? "bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] text-white shadow-lg"
+                : "text-[#6B7280] hover:bg-[#F5F5F5]"
+            }`}
+          >
+            <User className="w-5 h-5" />
+            <span>Patient Profile</span>
+          </button>
+        </nav>
       </div>
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col">
         {/* Header */}
-        <div className="bg-white border-b border-[#E5E5E5] px-8 py-6">
+        <div className="bg.white border-b border-[#E5E5E5] px-8 py-6">
           <div className="flex items-start justify-between">
             <div>
               <h2
@@ -338,7 +477,7 @@ export function WebDashboard({ onViewResults, userInfo, initialTab = "chat" }: W
                 {activeTab === "chat" && "AI Skin Assistant"}
                 {activeTab === "progress" && "Your Progress"}
                 {activeTab === "recommendations" && "Recommendations"}
-                {activeTab === "profile" && "User Profile"}
+                {activeTab === "patient-profile" && "Patient Profile"}
               </h2>
               <p className="text-[#6B7280] mt-1 font-['Manrope',sans-serif]">
                 {activeTab === "chat" && "Get personalized skincare advice"}
@@ -346,11 +485,22 @@ export function WebDashboard({ onViewResults, userInfo, initialTab = "chat" }: W
                   "Track your skin improvement and view your scan history"}
                 {activeTab === "recommendations" &&
                   "Personalized skincare routine and lifestyle tips"}
-                {activeTab === "profile" &&
-                  "Manage your account and personal information"}
+                {activeTab === "patient-profile" &&
+                  "Personal data, skin profile and doctor comments"}
               </p>
             </div>
-            <img src={bloomLogo} alt="Bloom" className="h-12" />
+            <div className="flex items-center gap-4">
+              {onTakeNewScan && activeTab === "progress" && (
+                <Button
+                  onClick={onTakeNewScan}
+                  className="h-12 px-6 bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] hover:opacity-90 text-white rounded-xl transition-opacity shadow-lg border-0 font-['Manrope',sans-serif]"
+                >
+                  <Camera className="w-5 h-5 mr-2" />
+                  New Scan
+                </Button>
+              )}
+              <img src={bloomLogo} alt="Bloom" className="h-12" />
+            </div>
           </div>
         </div>
 
@@ -365,9 +515,7 @@ export function WebDashboard({ onViewResults, userInfo, initialTab = "chat" }: W
                   <div
                     key={message.id}
                     className={`flex ${
-                      message.role === "user"
-                        ? "justify-end"
-                        : "justify-start"
+                      message.role === "user" ? "justify-end" : "justify-start"
                     }`}
                   >
                     <div
@@ -431,9 +579,7 @@ export function WebDashboard({ onViewResults, userInfo, initialTab = "chat" }: W
                     type="text"
                     value={inputValue}
                     onChange={(e) => setInputValue(e.target.value)}
-                    onKeyDown={(e) =>
-                      e.key === "Enter" && handleSendMessage()
-                    }
+                    onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
                     placeholder="Ask anything about your skin..."
                     className="flex-1 h-14 bg-[#F5F5F5] rounded-xl px-6 text-[#18212D] placeholder:text-[#6B7280] border border-[#E5E5E5] focus:outline-none focus:border-[#FF6B4A] transition-colors font-['Manrope',sans-serif]"
                   />
@@ -462,116 +608,115 @@ export function WebDashboard({ onViewResults, userInfo, initialTab = "chat" }: W
             </div>
           )}
 
-{/* Progress Tab */}
-{activeTab === "progress" && (
-  <div className="p-8 space-y-6">
-    {/* Key Metrics Overview (igual que en la pantalla de resultados) */}
-    <RadarOverview metrics={skinMetrics} overallHealth={overallHealth} />
+          {/* Progress Tab */}
+          {activeTab === "progress" && (
+            <div className="p-8 space-y-6">
+              {/* Key Metrics Overview (igual que en la pantalla de resultados) */}
+              <RadarOverview metrics={skinMetrics} overallHealth={overallHealth} />
 
-
-    {/* Photo History Section */}
-    <div className="bg-white rounded-2xl border border-[#E5E5E5] p-8 shadow-sm">
-      <div className="flex items-center gap-3 mb-6">
-        <CalendarIcon className="w-6 h-6 text-[#FF6B4A]" />
-        <h3
-          className="text-[#18212D] font-['Manrope',sans-serif]"
-          style={{ fontSize: "20px", lineHeight: "28px" }}
-        >
-          Photo History
-        </h3>
-      </div>
-
-      {scanHistory.length === 0 ? (
-        <p className="text-sm text-[#6B7280] font-['Manrope',sans-serif]">
-          No scans yet. Once you run your first analysis, it will appear here.
-        </p>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Calendar */}
-          <div className="flex flex-col">
-            <h4 className="text-[#6B7280] mb-4 font-['Manrope',sans-serif]">
-              Scan Calendar
-            </h4>
-            <div className="flex-1 flex items-center justify-center">
-              <Calendar
-                mode="single"
-                selected={selectedDate}
-                onSelect={setSelectedDate}
-                className="rounded-xl border-0"
-                modifiers={{
-                  hasPhoto: (date) => hasPhotoOnDate(date),
-                }}
-                modifiersStyles={{
-                  hasPhoto: {
-                    backgroundColor: "#FFF5F3",
-                    border: "2px solid #FF6B4A",
-                    fontWeight: "bold",
-                    color: "#FF6B4A",
-                  },
-                }}
-              />
-            </div>
-            <div className="mt-4 flex items-center gap-2 text-sm text-[#6B7280] font-['Manrope',sans-serif]">
-              <div className="w-4 h-4 rounded bg-[#FFF5F3] border-2 border-[#FF6B4A]" />
-              <span>Days with scans</span>
-            </div>
-          </div>
-
-          {/* Recent scans list */}
-          <div>
-            <h4 className="text-[#6B7280] mb-4 font-['Manrope',sans-serif]">
-              Recent scans
-            </h4>
-            <div className="space-y-4">
-              {scanHistory.slice(0, 4).map((scan, index) => {
-                const date = new Date(scan.createdAt);
-                return (
-                  <div
-                    key={scan.id}
-                    className="flex items-center gap-4 p-4 bg-[#F5F5F5] rounded-xl hover:bg-[#FFE5DD] transition-colors cursor-pointer group"
-                    onClick={onViewResults}
+              {/* Photo History Section */}
+              <div className="bg-white rounded-2xl border border-[#E5E5E5] p-8 shadow-sm">
+                <div className="flex items-center gap-3 mb-6">
+                  <CalendarIcon className="w-6 h-6 text-[#FF6B4A]" />
+                  <h3
+                    className="text-[#18212D] font-['Manrope',sans-serif]"
+                    style={{ fontSize: "20px", lineHeight: "28px" }}
                   >
-                    <div className="w-16 h-16 rounded-xl overflow-hidden bg-gradient-to-br from-[#FF6B4A] to-[#FFA94D] flex items-center justify-center">
-                      {scan.imageData ? (
-                        <img
-                          src={scan.imageData}
-                          alt="Scan"
-                          className="w-full h-full object-cover"
+                    Photo History
+                  </h3>
+                </div>
+
+                {scanHistory.length === 0 ? (
+                  <p className="text-sm text-[#6B7280] font-['Manrope',sans-serif]">
+                    No scans yet. Once you run your first analysis, it will appear
+                    here.
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Calendar */}
+                    <div className="flex flex-col">
+                      <h4 className="text-[#6B7280] mb-4 font-['Manrope',sans-serif]">
+                        Scan Calendar
+                      </h4>
+                      <div className="flex-1 flex items-center justify-center">
+                        <Calendar
+                          mode="single"
+                          selected={selectedDate}
+                          onSelect={setSelectedDate}
+                          className="rounded-xl border-0"
+                          modifiers={{
+                            hasPhoto: (date) => hasPhotoOnDate(date),
+                          }}
+                          modifiersStyles={{
+                            hasPhoto: {
+                              backgroundColor: "#FFF5F3",
+                              border: "2px solid #FF6B4A",
+                              fontWeight: "bold",
+                              color: "#FF6B4A",
+                            },
+                          }}
                         />
-                      ) : (
-                        <Camera className="w-7 h-7 text-white" />
-                      )}
-                    </div>
-                    <div className="flex-1">
-                      <div className="text-[#18212D] font-['Manrope',sans-serif]">
-                        Skin analysis #{scanHistory.length - index}
                       </div>
-                      <div className="text-sm text-[#6B7280] font-['Manrope',sans-serif]">
-                        {date.toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                          year: "numeric",
-                        })}{" "}
-                        ·{" "}
-                        {scan.source === "camera" ? "Camera" : "Upload"}
-                      </div>
-                      <div className="text-xs text-[#10B981] mt-1 font-['Manrope',sans-serif]">
-                        Score: coming soon
+                      <div className="mt-4 flex.items-center gap-2 text-sm text-[#6B7280] font-['Manrope',sans-serif]">
+                        <div className="w-4 h-4 rounded bg-[#FFF5F3] border-2 border-[#FF6B4A]" />
+                        <span>Days with scans</span>
                       </div>
                     </div>
-                    <button className="opacity-0 group-hover:opacity-100 transition-opacity text-[#FF6B4A] hover:text-[#E74C3C]">
-                      <ChevronRight className="w-6 h-6" />
-                    </button>
+
+                    {/* Recent scans list */}
+                    <div>
+                      <h4 className="text-[#6B7280] mb-4 font-['Manrope',sans-serif]">
+                        Recent scans
+                      </h4>
+                      <div className="space-y-4">
+                        {scanHistory.slice(0, 4).map((scan, index) => {
+                          const date = new Date(scan.createdAt);
+                          return (
+                            <div
+                              key={scan.id}
+                              className="flex items-center gap-4 p-4 bg-[#F5F5F5] rounded-xl hover:bg-[#FFE5DD] transition-colors cursor-pointer group"
+                              onClick={onViewResults}
+                            >
+                              <div className="w-16 h-16 rounded-xl overflow-hidden bg-gradient-to-br from-[#FF6B4A] to-[#FFA94D] flex items-center justify-center">
+                                {scan.imageData ? (
+                                  <img
+                                    src={scan.imageData}
+                                    alt="Scan"
+                                    className="w-full h-full object-cover"
+                                  />
+                                ) : (
+                                  <Camera className="w-7 h-7 text-white" />
+                                )}
+                              </div>
+                              <div className="flex-1">
+                                <div className="text-[#18212D] font-['Manrope',sans-serif]">
+                                  Skin analysis #{scanHistory.length - index}
+                                </div>
+                                <div className="text-sm text-[#6B7280] font-['Manrope',sans-serif]">
+                                  {date.toLocaleDateString("en-US", {
+                                    month: "short",
+                                    day: "numeric",
+                                    year: "numeric",
+                                  })}{" "}
+                                  · {scan.source === "camera" ? "Camera" : "Upload"}
+                                </div>
+                                <div className="text-xs text-[#10B981] mt-1 font-['Manrope',sans-serif]">
+                                  Score: coming soon
+                                </div>
+                              </div>
+                              <button className="opacity-0 group-hover:opacity-100 transition-opacity text-[#FF6B4A] hover:text-[#E74C3C]">
+                                <ChevronRight className="w-6 h-6" />
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
-                );
-              })}
+                )}
+              </div>
             </div>
-          </div>
-        </div>
-      )}
-    </div>
-  </div>
-)}
+          )}
 
           {/* Recommendations Tab */}
           {activeTab === "recommendations" && (
@@ -604,23 +749,23 @@ export function WebDashboard({ onViewResults, userInfo, initialTab = "chat" }: W
                           Maintain barrier function
                         </div>
                       </div>
-                      <div className="bg.white rounded-lg p-3 border border-[#E5E5E5]">
+                      <div className="bg-white rounded-lg p-3 border border-[#E5E5E5]">
                         <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
                           Vitamin C Serum 15%
                         </div>
                         <div className="text-xs text-[#6B7280] font-['Manrope',sans-serif]">
-                          Antioxidant protection & brightening
+                          Antioxidant protection &amp; brightening
                         </div>
                       </div>
-                      <div className="bg.white rounded-lg p-3 border border-[#E5E5E5]">
+                      <div className="bg-white rounded-lg p-3 border border-[#E5E5E5]">
                         <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
                           Niacinamide 10%
                         </div>
                         <div className="text-xs text-[#6B7280] font-['Manrope',sans-serif]">
-                          Pore refinement & oil control
+                          Pore refinement &amp; oil control
                         </div>
                       </div>
-                      <div className="bg.white rounded-lg p-3 border border-[#E5E5E5]">
+                      <div className="bg-white rounded-lg p-3 border border-[#E5E5E5]">
                         <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
                           SPF 50+
                         </div>
@@ -647,26 +792,26 @@ export function WebDashboard({ onViewResults, userInfo, initialTab = "chat" }: W
                           Oil Cleanser
                         </div>
                         <div className="text-xs text-[#6B7280] font-['Manrope',sans-serif]">
-                          Remove sunscreen & impurities
+                          Remove sunscreen &amp; impurities
                         </div>
                       </div>
-                      <div className="bg.white rounded-lg p-3 border border-[#E5E5E5]">
+                      <div className="bg-white rounded-lg p-3 border border-[#E5E5E5]">
                         <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
                           Salicylic Acid 2%
                         </div>
                         <div className="text-xs text-[#6B7280] font-['Manrope',sans-serif]">
-                          Acne control & pore care
+                          Acne control &amp; pore care
                         </div>
                       </div>
-                      <div className="bg.white rounded-lg p-3 border border-[#E5E5E5]">
+                      <div className="bg-white rounded-lg p-3 border border-[#E5E5E5]">
                         <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
                           Retinol 0.5%
                         </div>
                         <div className="text-xs text-[#6B7280] font-['Manrope',sans-serif]">
-                          Anti-aging & texture improvement
+                          Anti-aging &amp; texture improvement
                         </div>
                       </div>
-                      <div className="bg.white rounded-lg p-3 border border-[#E5E5E5]">
+                      <div className="bg-white rounded-lg p-3 border border-[#E5E5E5]">
                         <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
                           Ceramide Moisturizer
                         </div>
@@ -688,7 +833,7 @@ export function WebDashboard({ onViewResults, userInfo, initialTab = "chat" }: W
                       </h4>
                     </div>
                     <div className="space-y-3">
-                      <div className="bg.white rounded-lg p-3 border border-[#E5E5E5]">
+                      <div className="bg-white rounded-lg p-3 border border-[#E5E5E5]">
                         <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
                           AHA/BHA Peel Mask
                         </div>
@@ -696,7 +841,7 @@ export function WebDashboard({ onViewResults, userInfo, initialTab = "chat" }: W
                           Deep exfoliation for texture
                         </div>
                       </div>
-                      <div className="bg.white rounded-lg p-3 border border-[#E5E5E5]">
+                      <div className="bg-white rounded-lg p-3 border border-[#E5E5E5]">
                         <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
                           Hydrating Sheet Mask
                         </div>
@@ -704,12 +849,12 @@ export function WebDashboard({ onViewResults, userInfo, initialTab = "chat" }: W
                           Boost hydration levels
                         </div>
                       </div>
-                      <div className="bg.white rounded-lg p-3 border border-[#E5E5E5]">
+                      <div className="bg-white rounded-lg p-3 border border-[#E5E5E5]">
                         <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
                           Clay Mask (T-zone)
                         </div>
                         <div className="text-xs text-[#6B7280] font-['Manrope',sans-serif]">
-                          Oil control & pore cleansing
+                          Oil control &amp; pore cleansing
                         </div>
                       </div>
                     </div>
@@ -726,7 +871,7 @@ export function WebDashboard({ onViewResults, userInfo, initialTab = "chat" }: W
                       </h4>
                     </div>
                     <div className="space-y-3">
-                      <div className="bg.white rounded-lg p-3 border border-[#E5E5E5]">
+                      <div className="bg-white rounded-lg p-3 border border-[#E5E5E5]">
                         <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
                           Hydration Goal
                         </div>
@@ -734,7 +879,7 @@ export function WebDashboard({ onViewResults, userInfo, initialTab = "chat" }: W
                           Drink 8 glasses of water daily
                         </div>
                       </div>
-                      <div className="bg.white rounded-lg p-3 border border-[#E5E5E5]">
+                      <div className="bg-white rounded-lg p-3 border border-[#E5E5E5]">
                         <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
                           Sleep Quality
                         </div>
@@ -742,7 +887,7 @@ export function WebDashboard({ onViewResults, userInfo, initialTab = "chat" }: W
                           Aim for 7-9 hours nightly
                         </div>
                       </div>
-                      <div className="bg.white rounded-lg p-3 border border-[#E5E5E5]">
+                      <div className="bg-white rounded-lg p-3 border border-[#E5E5E5]">
                         <div className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
                           Nutrition
                         </div>
@@ -757,267 +902,484 @@ export function WebDashboard({ onViewResults, userInfo, initialTab = "chat" }: W
             </div>
           )}
 
-          {/* Profile Tab */}
-          {activeTab === "profile" && (
+          {/* Patient Profile Tab */}
+          {activeTab === "patient-profile" && (
             <div className="p-8 space-y-6">
-              {/* Profile Photo Section */}
-              <div className="bg.white rounded-2xl border border-[#E5E5E5] p-8 shadow-sm">
-                <h3
-                  className="text-[#18212D] mb-6 font-['Manrope',sans-serif]"
-                  style={{ fontSize: "20px", lineHeight: "28px" }}
-                >
-                  Profile Photo
-                </h3>
-                <div className="flex items-center gap-6">
-                  {profilePhoto ? (
-                    <img
-                      src={profilePhoto}
-                      alt="Profile"
-                      className="w-24 h-24 rounded-full object-cover border-4 border-[#E5E5E5]"
-                    />
-                  ) : (
-                    <div className="w-24 h-24 rounded-full bg-gradient-to-br from-[#FF6B4A] to-[#FFA94D] flex items-center justify-center">
-                      <User className="w-12 h-12 text-white" />
-                    </div>
-                  )}
-                  <div className="flex-1">
-                    <input
-                      ref={profilePhotoInputRef}
-                      type="file"
-                      accept="image/*"
-                      onChange={handleProfilePhotoUpload}
-                      className="hidden"
-                    />
-                    <Button
-                      onClick={() => profilePhotoInputRef.current?.click()}
-                      className="bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] hover:from-[#E74C3C] hover:to-[#FF8C42] text-white rounded-xl px-6 py-3 border-0 font-['Manrope',sans-serif]"
-                    >
-                      <Camera className="w-5 h-5 mr-2" />
-                      {profilePhoto ? "Change Photo" : "Upload Photo"}
-                    </Button>
-                    {profilePhoto && (
-                      <Button
-                        onClick={() => setProfilePhoto(null)}
-                        className="ml-3 bg-white hover:bg-[#F5F5F5] text-[#6B7280] hover:text-[#FF6B4A] rounded-xl px-6 py-3 border border-[#E5E5E5] font-['Manrope',sans-serif]"
-                      >
-                        Remove Photo
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </div>
+              {/* Personal data + Skin profile side by side */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
+                {/* Personal data */}
+                <div className="bg-white rounded-2xl border border-[#E5E5E5] p-6 shadow-sm h-full">
+                  <h3
+                    className="text-[#18212D] mb-4 font-['Manrope',sans-serif]"
+                    style={{ fontSize: "18px", lineHeight: "26px" }}
+                  >
+                    Personal data
+                  </h3>
 
-              {/* Personal Information */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Editable Name */}
-                <div className="bg-white rounded-2xl border border-[#E5E5E5] p-8 shadow-sm">
-                  <div className="flex items-center justify-between mb-6">
-                    <h3
-                      className="text-[#18212D] font-['Manrope',sans-serif]"
-                      style={{ fontSize: "20px", lineHeight: "28px" }}
-                    >
-                      Name
-                    </h3>
-                    {!isEditingName && (
-                      <button
-                        onClick={() => setIsEditingName(true)}
-                        className="text-[#FF6B4A] hover:text-[#E74C3C] transition-colors"
-                      >
-                        <Edit className="w-5 h-5" />
-                      </button>
-                    )}
-                  </div>
-                  {isEditingName ? (
-                    <div className="space-y-3">
-                      <input
-                        type="text"
-                        value={tempName}
-                        onChange={(e) => setTempName(e.target.value)}
-                        className="w-full h-12 bg-[#F5F5F5] rounded-xl px-4 text-[#18212D] border border-[#E5E5E5] focus:outline-none focus:border-[#FF6B4A] transition-colors font-['Manrope',sans-serif]"
-                      />
-                      <div className="flex gap-2">
+                  <div className="flex flex-col md:flex-row gap-6 items-start">
+                    {/* Profile photo + button */}
+                    <div className="flex flex-col.items-center md:items-start gap-3">
+                      {profilePhoto ? (
+                        <img
+                          src={profilePhoto}
+                          alt="Profile"
+                          className="w-20 h-20 rounded-full object-cover border-4 border-[#FFE0D3]"
+                        />
+                      ) : (
+                        <div className="w-20 h-20 rounded-full bg-gradient-to-br from-[#FF6B4A] to-[#FFA94D] flex items-center justify-center">
+                          <User className="w-10 h-10 text-white" />
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap gap-2">
+                        <input
+                          ref={profilePhotoInputRef}
+                          type="file"
+                          accept="image/*"
+                          onChange={handleProfilePhotoUpload}
+                          className="hidden"
+                        />
                         <Button
-                          onClick={handleSaveName}
-                          className="flex-1 bg-gradient.to-r from-[#FF6B4A] to-[#FFA94D] hover:from-[#E74C3C] hover:to-[#FF8C42] text-white rounded-xl px-4 py-2 border-0 font-['Manrope',sans-serif]"
+                          onClick={() => profilePhotoInputRef.current?.click()}
+                          className="h-9 px-4 bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] hover:from-[#E74C3C] hover:to-[#FF8C42] text-white rounded-full border-0 text-xs font-['Manrope',sans-serif]"
                         >
-                          <Check className="w-4 h-4 mr-2" />
-                          Save
+                          <Camera className="w-4 h-4 mr-1" />
+                          {profilePhoto ? "Change photo" : "Upload photo"}
                         </Button>
-                        <Button
-                          onClick={handleCancelName}
-                          className="flex-1 bg-white hover:bg-[#F5F5F5] text-[#6B7280] hover:text-[#FF6B4A] rounded-xl px-4 py-2 border border-[#E5E5E5] font-['Manrope',sans-serif]"
-                        >
-                          <X className="w-4 h-4 mr-2" />
-                          Cancel
-                        </Button>
+
+                        {profilePhoto && (
+                          <Button
+                            onClick={() => setProfilePhoto(null)}
+                            className="h-9 px-4 bg-white hover:bg-[#F5F5F5] text-[#6B7280] hover:text-[#FF6B4A] rounded-full border border-[#E5E5E5] text-xs font-['Manrope',sans-serif]"
+                          >
+                            Remove
+                          </Button>
+                        )}
                       </div>
                     </div>
-                  ) : (
-                    <div className="flex items-center gap-3">
-                      <User className="w-5 h-5 text-[#FF6B4A]" />
-                      <span className="text-[#18212D] font-['Manrope',sans-serif]">
-                        {userName}
-                      </span>
-                    </div>
-                  )}
-                </div>
 
-                {/* Editable Email */}
-                <div className="bg.white rounded-2xl border border-[#E5E5E5] p-8 shadow-sm">
-                  <div className="flex.items-center justify-between mb-6">
-                    <h3
-                      className="text-[#18212D] font-['Manrope',sans-serif]"
-                      style={{ fontSize: "20px", lineHeight: "28px" }}
-                    >
-                      Email
-                    </h3>
-                    {!isEditingEmail && (
-                      <button
-                        onClick={() => setIsEditingEmail(true)}
-                        className="text-[#FF6B4A] hover:text-[#E74C3C] transition-colors"
-                      >
-                        <Edit className="w-5 h-5" />
-                      </button>
-                    )}
-                  </div>
-                  {isEditingEmail ? (
-                    <div className="space-y-3">
-                      <input
-                        type="email"
-                        value={tempEmail}
-                        onChange={(e) => setTempEmail(e.target.value)}
-                        className="w-full h-12 bg-[#F5F5F5] rounded-xl px-4 text-[#18212D] border border-[#E5E5E5] focus:outline-none focus:border-[#FF6B4A] transition-colors font-['Manrope',sans-serif]"
-                      />
-                      <div className="flex gap-2">
-                        <Button
-                          onClick={handleSaveEmail}
-                          className="flex-1 bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] hover:from-[#E74C3C] hover:to-[#FF8C42] text-white rounded-xl px-4 py-2 border-0 font-['Manrope',sans-serif]"
-                        >
-                          <Check className="w-4 h-4 mr-2" />
-                          Save
-                        </Button>
-                        <Button
-                          onClick={handleCancelEmail}
-                          className="flex-1 bg-white hover:bg-[#F5F5F5] text-[#6B7280] hover:text-[#FF6B4A] rounded-xl px-4 py-2 border border-[#E5E5E5] font-['Manrope',sans-serif]"
-                        >
-                          <X className="w-4 h-4 mr-2" />
-                          Cancel
-                        </Button>
+                    {/* Name + Email + Age */}
+                    <div className="flex-1 max-w-xl w-full space-y-4">
+                      {/* Name */}
+                      <div className="rounded-xl border border-[#E5E5E5] px-4 py-3 bg-[#F9FAFB]">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs uppercase tracking-wide text-[#9CA3AF] font-['Manrope',sans-serif]">
+                            Name
+                          </span>
+                          {!isEditingName && (
+                            <button
+                              onClick={() => setIsEditingName(true)}
+                              className="text-[#FF6B4A] hover:text-[#E74C3C] transition-colors"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+
+                        {isEditingName ? (
+                          <div className="space-y-2 mt-1">
+                            <input
+                              type="text"
+                              value={tempName}
+                              onChange={(e) => setTempName(e.target.value)}
+                              className="w-full h-9 bg-white rounded-lg px-3 text-sm text-[#18212D] border border-[#E5E5E5] focus:outline-none focus:border-[#FF6B4A] font-['Manrope',sans-serif]"
+                            />
+                            <div className="flex gap-2">
+                              <Button
+                                onClick={handleSaveName}
+                                className="flex-1 h-9 text-xs bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] hover:from-[#E74C3C] hover:to-[#FF8C42] text-white rounded-lg border-0 font-['Manrope',sans-serif]"
+                              >
+                                <Check className="w-4 h-4 mr-1" />
+                                Save
+                              </Button>
+                              <Button
+                                onClick={handleCancelName}
+                                className="flex-1 h-9 text-xs bg-white hover:bg-[#F5F5F5] text-[#6B7280] hover:text-[#FF6B4A] rounded-lg border border-[#E5E5E5] font-['Manrope',sans-serif]"
+                              >
+                                <X className="w-4 h-4 mr-1" />
+                                Cancel
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2 mt-1">
+                            <User className="w-4 h-4 text-[#FF6B4A]" />
+                            <span className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
+                              {userName}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Email */}
+                      <div className="rounded-xl border border-[#E5E5E5] px-4 py-3 bg-[#F9FAFB]">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs uppercase tracking-wide text-[#9CA3AF] font-['Manrope',sans-serif]">
+                            Email
+                          </span>
+                          {!isEditingEmail && (
+                            <button
+                              onClick={() => setIsEditingEmail(true)}
+                              className="text-[#FF6B4A] hover:text-[#E74C3C] transition-colors"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+
+                        {isEditingEmail ? (
+                          <div className="space-y-2 mt-1">
+                            <input
+                              type="email"
+                              value={tempEmail}
+                              onChange={(e) => setTempEmail(e.target.value)}
+                              className="w-full h-9 bg-white rounded-lg px-3 text-sm text-[#18212D] border border-[#E5E5E5] focus:outline-none focus:border-[#FF6B4A] font-['Manrope',sans-serif]"
+                            />
+                            <div className="flex gap-2">
+                              <Button
+                                onClick={handleSaveEmail}
+                                className="flex-1 h-9 text-xs bg-gradient.to-r from-[#FF6B4A] to-[#FFA94D] hover:from-[#E74C3C] hover:to-[#FF8C42] text-white rounded-lg border-0 font-['Manrope',sans-serif]"
+                              >
+                                <Check className="w-4 h-4 mr-1" />
+                                Save
+                              </Button>
+                              <Button
+                                onClick={handleCancelEmail}
+                                className="flex-1 h-9 text-xs bg-white hover:bg-[#F5F5F5] text-[#6B7280] hover:text-[#FF6B4A] rounded-lg border border-[#E5E5E5] font-['Manrope',sans-serif]"
+                              >
+                                <X className="w-4 h-4 mr-1" />
+                                Cancel
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2 mt-1">
+                            <Mail className="w-4 h-4 text-[#FF6B4A]" />
+                            <span className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
+                              {userEmail}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Age */}
+                      <div className="rounded-xl border border-[#E5E5E5] px-4 py-3 bg-[#F9FAFB]">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs uppercase tracking-wide text-[#9CA3AF] font-['Manrope',sans-serif]">
+                            Age
+                          </span>
+                          {!isEditingAge && (
+                            <button
+                              onClick={() => setIsEditingAge(true)}
+                              className="text-[#FF6B4A] hover:text-[#E74C3C] transition-colors"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+
+                        {isEditingAge ? (
+                          <div className="space-y-2 mt-1">
+                            <input
+                              type="text"
+                              value={tempAge}
+                              onChange={(e) => setTempAge(e.target.value)}
+                              className="w-full h-9 bg-white rounded-lg px-3 text-sm text-[#18212D] border border-[#E5E5E5] focus:outline.none focus:border-[#FF6B4A] font-['Manrope',sans-serif]"
+                            />
+                            <div className="flex gap-2">
+                              <Button
+                                onClick={handleSaveAge}
+                                className="flex-1 h-9 text-xs bg-gradient.to-r from-[#FF6B4A] to-[#FFA94D] hover:from-[#E74C3C] hover:to-[#FF8C42] text-white rounded-lg border-0 font-['Manrope',sans-serif]"
+                              >
+                                <Check className="w-4 h-4 mr-1" />
+                                Save
+                              </Button>
+                              <Button
+                                onClick={handleCancelAge}
+                                className="flex-1 h-9 text-xs bg-white hover:bg-[#F5F5F5] text-[#6B7280] hover:text-[#FF6B4A] rounded-lg border border-[#E5E5E5] font-['Manrope',sans-serif]"
+                              >
+                                <X className="w-4 h-4 mr-1" />
+                                Cancel
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-sm text-[#18212D] font-['Manrope',sans-serif]">
+                              {userAge}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
-                  ) : (
-                    <div className="flex items-center gap-3">
-                      <Mail className="w-5 h-5 text-[#FF6B4A]" />
-                      <span className="text-[#18212D] font-['Manrope',sans-serif]">
-                        {userEmail}
-                      </span>
-                    </div>
-                  )}
+                  </div>
                 </div>
-              </div>
 
-              {/* Initial Questionnaire Data */}
-              <div className="bg.white rounded-2xl border border-[#E5E5E5] p-8 shadow-sm">
-                <h3
-                  className="text-[#18212D] mb-6 font-['Manrope',sans-serif]"
-                  style={{ fontSize: "20px", lineHeight: "28px" }}
-                >
-                  Your Skin Profile
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <div className="text-sm text-[#6B7280] font-['Manrope',sans-serif]">
-                      Skin Type
-                    </div>
-                    <div className="text-[#18212D] font-['Manrope',sans-serif]">
-                      {userQuestionnaire.skinType}
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="text-sm text-[#6B7280] font-['Manrope',sans-serif]">
-                      Age
-                    </div>
-                    <div className="text-[#18212D] font-['Manrope',sans-serif]">
-                      {userQuestionnaire.age}
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="text-sm text-[#6B7280] font-['Manrope',sans-serif]">
-                      Main Concerns
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {userQuestionnaire.concerns.map((concern, idx) => (
-                        <span
-                          key={idx}
-                          className="px-3 py-1 bg-[#FFF5F3] text-[#FF6B4A] rounded-full text-xs font-['Manrope',sans-serif]"
-                        >
-                          {concern}
+                {/* Your Skin Profile */}
+                <div className="bg-white rounded-2xl border border-[#E5E5E5] p-6 shadow-sm h-full">
+                  <h3
+                    className="text-[#18212D] mb-6 font-['Manrope',sans-serif]"
+                    style={{ fontSize: "20px", lineHeight: "28px" }}
+                  >
+                    Your Skin Profile
+                  </h3>
+
+                  <div className="max-w-xl w-full space-y-4">
+                    {/* Skin Type */}
+                    <div className="rounded-xl border border-[#E5E5E5] px-4 py-3 bg-[#F9FAFB]">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs uppercase tracking-wide text-[#9CA3AF] font-['Manrope',sans-serif]">
+                          Skin Type
                         </span>
-                      ))}
+                        {!isEditingSkinType && (
+                          <button
+                            onClick={() => setIsEditingSkinType(true)}
+                            className="text-[#FF6B4A] hover:text-[#E74C3C] transition-colors"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+
+                      {isEditingSkinType ? (
+                        <div className="space-y-2 mt-1">
+                          <input
+                            type="text"
+                            value={tempSkinType}
+                            onChange={(e) => setTempSkinType(e.target.value)}
+                            className="w-full h-9 bg-white rounded-lg px-3 text-sm text-[#18212D] border border-[#E5E5E5] focus:outline-none focus:border-[#FF6B4A] font-['Manrope',sans-serif]"
+                          />
+                          <div className="flex gap-2">
+                          <Button
+  onClick={handleSaveSkinType}
+  className="flex-1 h-9 text-xs bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] 
+    hover:from-[#E74C3C] hover:to-[#FF8C42] 
+    text-white rounded-lg border-0 
+    font-['Manrope',sans-serif]"
+>
+  <Check className="w-4 h-4 mr-1" />
+  Save
+</Button>
+                            <Button
+                              onClick={handleCancelSkinType}
+                              className="flex-1 h-9 text-xs bg-white hover:bg-[#F5F5F5] text-[#6B7280] hover:text-[#FF6B4A] rounded-lg border border-[#E5E5E5] font-['Manrope',sans-serif]"
+                            >
+                              <X className="w-4 h-4 mr-1" />
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-1 text-sm text-[#18212D] font-['Manrope',sans-serif]">
+                          {skinType}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="text-sm text-[#6B7280] font-['Manrope',sans-serif]">
-                      Allergies
+
+                    {/* Main Concerns */}
+                    <div className="rounded-xl border border-[#E5E5E5] px-4 py-3 bg-[#F9FAFB]">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs uppercase tracking-wide text-[#9CA3AF] font-['Manrope',sans-serif]">
+                          Main concerns
+                        </span>
+                        {!isEditingMainConcerns && (
+                          <button
+                            onClick={() => setIsEditingMainConcerns(true)}
+                            className="text-[#FF6B4A] hover:text-[#E74C3C] transition-colors"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+
+                      {isEditingMainConcerns ? (
+                        <div className="space-y-2 mt-1">
+                          <input
+                            type="text"
+                            value={tempMainConcerns}
+                            onChange={(e) => setTempMainConcerns(e.target.value)}
+                            placeholder="e.g. Acne, Dark spots, Large pores"
+                            className="w-full h-9 bg-white rounded-lg px-3 text-sm text-[#18212D] border border-[#E5E5E5] focus:outline-none focus:border-[#FF6B4A] font-['Manrope',sans-serif]"
+                          />
+                          <div className="flex gap-2">
+                            <Button
+                              onClick={handleSaveMainConcerns}
+                              className="flex-1 h-9 text-xs bg-gradient.to-r from-[#FF6B4A] to-[#FFA94D] hover:from-[#E74C3C] hover:to-[#FF8C42] text-white rounded-lg border-0 font-['Manrope',sans-serif]"
+                            >
+                              <Check className="w-4 h-4 mr-1" />
+                              Save
+                            </Button>
+                            <Button
+                              onClick={handleCancelMainConcerns}
+                              className="flex-1 h-9 text-xs bg-white hover:bg-[#F5F5F5] text-[#6B7280] hover:text-[#FF6B4A] rounded-lg border border-[#E5E5E5] font-['Manrope',sans-serif]"
+                            >
+                              <X className="w-4 h-4 mr-1" />
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-1 flex flex-wrap gap-2">
+                          {mainConcerns.length === 0 ? (
+                            <span className="text-sm text-[#9CA3AF] font-['Manrope',sans-serif]">
+                              Not specified
+                            </span>
+                          ) : (
+                            mainConcerns.map((concern, idx) => (
+                              <span
+                                key={idx}
+                                className="px-3 py-1 bg-[#FFF5F3] text-[#FF6B4A] rounded-full text-xs font-['Manrope',sans-serif]"
+                              >
+                                {concern}
+                              </span>
+                            ))
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <div className="text-[#18212D] font-['Manrope',sans-serif]">
-                      {userQuestionnaire.allergies}
+
+                    {/* Allergies */}
+                    <div className="rounded-xl border border-[#E5E5E5] px-4 py-3 bg-[#F9FAFB]">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs uppercase tracking-wide text-[#9CA3AF] font-['Manrope',sans-serif]">
+                          Allergies
+                        </span>
+                        {!isEditingAllergies && (
+                          <button
+                            onClick={() => setIsEditingAllergies(true)}
+                            className="text-[#FF6B4A] hover:text-[#E74C3C] transition-colors"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+
+                      {isEditingAllergies ? (
+                        <div className="space-y-2 mt-1">
+                          <input
+                            type="text"
+                            value={tempAllergies}
+                            onChange={(e) => setTempAllergies(e.target.value)}
+                            placeholder="e.g. No known allergies, Sensitive to fragrance..."
+                            className="w-full h-9 bg-white rounded-lg px-3 text-sm text-[#18212D] border border-[#E5E5E5] focus:outline-none focus:border-[#FF6B4A] font-['Manrope',sans-serif]"
+                          />
+                          <div className="flex gap-2">
+                            <Button
+                              onClick={handleSaveAllergies}
+                              className="flex-1 h-9 text-xs bg-gradient.to-r from-[#FF6B4A] to-[#FFA94D] hover:from-[#E74C3C] hover:to-[#FF8C42] text-white rounded-lg border-0 font-['Manrope',sans-serif]"
+                            >
+                              <Check className="w-4 h-4 mr-1" />
+                              Save
+                            </Button>
+                            <Button
+                              onClick={handleCancelAllergies}
+                              className="flex-1 h-9 text-xs bg-white hover:bg-[#F5F5F5] text-[#6B7280] hover:text-[#FF6B4A] rounded-lg border border-[#E5E5E5] font-['Manrope',sans-serif]"
+                            >
+                              <X className="w-4 h-4 mr-1" />
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-1 text-sm text-[#18212D] font-['Manrope',sans-serif]">
+                          {allergies}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="text-sm text-[#6B7280] font-['Manrope',sans-serif]">
-                      Current Products
-                    </div>
-                    <div className="text-[#18212D] font-['Manrope',sans-serif]">
-                      {userQuestionnaire.currentProducts}
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="text-sm text-[#6B7280] font-['Manrope',sans-serif]">
-                      Sun Exposure
-                    </div>
-                    <div className="text-[#18212D] font-['Manrope',sans-serif]">
-                      {userQuestionnaire.sunExposure}
+
+                    {/* Current Products */}
+                    <div className="rounded-xl border border-[#E5E5E5] px-4 py-3 bg-[#F9FAFB]">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs uppercase tracking-wide text-[#9CA3AF] font-['Manrope',sans-serif]">
+                          Current products
+                        </span>
+                        {!isEditingCurrentProducts && (
+                          <button
+                            onClick={() => setIsEditingCurrentProducts(true)}
+                            className="text-[#FF6B4A] hover:text-[#E74C3C] transition-colors"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+
+                      {isEditingCurrentProducts ? (
+                        <div className="space-y-2 mt-1">
+                          <textarea
+                            value={tempCurrentProducts}
+                            onChange={(e) => setTempCurrentProducts(e.target.value)}
+                            rows={3}
+                            className="w-full rounded-lg border border-[#E5E5E5] bg-white px-3 py-2 text-sm text-[#18212D] resize-vertical focus:outline-none focus:border-[#FF6B4A] font-['Manrope',sans-serif]"
+                            placeholder="List of products the patient is currently using..."
+                          />
+                          <div className="flex gap-2">
+                            <Button
+                              onClick={handleSaveCurrentProducts}
+                              className="flex-1 h-9 text-xs bg-gradient.to-r from-[#FF6B4A] to-[#FFA94D] hover:from-[#E74C3C] hover:to-[#FF8C42] text-white rounded-lg border-0 font-['Manrope',sans-serif]"
+                            >
+                              <Check className="w-4 h-4 mr-1" />
+                              Save
+                            </Button>
+                            <Button
+                              onClick={handleCancelCurrentProducts}
+                              className="flex-1 h-9 text-xs bg-white hover:bg-[#F5F5F5] text-[#6B7280] hover:text-[#FF6B4A] rounded-lg border border-[#E5E5E5] font-['Manrope',sans-serif]"
+                            >
+                              <X className="w-4 h-4 mr-1" />
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-1 text-sm text-[#18212D] font-['Manrope',sans-serif] whitespace-pre-line">
+                          {currentProducts}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Account Info */}
-              <div className="bg-gradient-to-br from-white to-orange-50/30 rounded-2xl border border-[#E5E5E5] p-8 shadow-sm">
-                <h3
-                  className="text-[#18212D] mb-4 font-['Manrope',sans-serif]"
-                  style={{ fontSize: "20px", lineHeight: "28px" }}
-                >
-                  Account Status
-                </h3>
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[#6B7280] font-['Manrope',sans-serif]">
-                      Membership
-                    </span>
-                    <span className="px-4 py-1 bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] text-white rounded-full text-sm font-['Manrope',sans-serif]">
-                      Premium
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[#6B7280] font-['Manrope',sans-serif]">
-                      Member Since
-                    </span>
-                    <span className="text-[#18212D] font-['Manrope',sans-serif]">
-                      {userQuestionnaire.joinDate}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[#6B7280] font-['Manrope',sans-serif]">
-                      Total Scans
-                    </span>
-                    <span className="text-[#18212D] font-['Manrope',sans-serif]">
-                      {scanHistory.length}
-                    </span>
-                  </div>
-                </div>
-              </div>
+              {/* Doctor Comments (lo dejamos igual que ya funciona) */}
+<div className="bg-gradient-to-br from-white to-orange-50/30 rounded-2xl border border-[#E5E5E5] p-8 shadow-sm">
+  <h3
+    className="text-[#18212D] mb-4 font-['Manrope',sans-serif]"
+    style={{ fontSize: "20px", lineHeight: "28px" }}
+  >
+    Doctor comments
+  </h3>
+  <p className="text-sm text-[#6B7280] mb-4 font-['Manrope',sans-serif]">
+    Notes about this patient&apos;s skin, treatment plans or follow-up
+    recommendations. Only visible in the doctor dashboard.
+  </p>
+  <textarea
+    value={doctorNotes}
+    onChange={(e) => setDoctorNotes(e.target.value)}
+    rows={5}
+    className="w-full rounded-xl border border-[#E5E5E5] bg-white px-4 py-3 text-sm text-[#18212D] resize-vertical focus:outline-none focus:border-[#FF6B4A] font-['Manrope',sans-serif]"
+    placeholder="Add your clinical observations, recommendations or follow-up notes..."
+  />
+  <div className="mt-4 flex items-center justify-between gap-3">
+    <div className="text-xs text-[#6B7280] font-['Manrope',sans-serif]">
+      {notesSavedAt &&
+        `Last saved at ${notesSavedAt.toLocaleTimeString("en-US", {
+          hour: "2-digit",
+          minute: "2-digit",
+        })}`}
+    </div>
+
+    <Button
+      onClick={handleSaveDoctorNotes}
+      disabled={isSavingNotes}
+      className="h-10 px-6 rounded-xl border-0 text-sm font-['Manrope',sans-serif]
+                 bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D]
+                 text-white shadow-md
+                 hover:from-[#E74C3C] hover:to-[#FF8C42]
+                 disabled:opacity-60 disabled:cursor-not-allowed"
+    >
+      {isSavingNotes ? "Saving..." : "Save notes"}
+    </Button>
+  </div>
+</div>
             </div>
           )}
         </div>

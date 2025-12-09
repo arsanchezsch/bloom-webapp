@@ -14,7 +14,6 @@ import { exportElementToPdf } from "../utils/exportToPdf";
 import {
   skinMetrics as staticSkinMetrics,
   overallHealth as mockOverallHealth,
-  recommendations,
 } from "../constants/skinAnalysis";
 import { formatDate } from "../utils/helpers";
 import type { SkinMetric } from "../types";
@@ -25,7 +24,6 @@ import { RadarOverview } from "./results/RadarOverview";
 import { MetricCard } from "./results/MetricCard";
 import { MetricDetailModal } from "./results/MetricDetailModal";
 import { ShareModal } from "./results/ShareModal";
-import { RoutineCard } from "./results/RoutineCard";
 
 // Haut hook + mapper para OverallHealth real
 import { useHautInference } from "../hooks/useHautInference";
@@ -51,24 +49,15 @@ const OVERALL_METRIC_IDS = [
 
 // Simple mapping from Haut algorithm tech names → Bloom metric IDs.
 const TECH_NAME_TO_SKIN_METRIC_ID: Record<string, string> = {
-  // básicos que ya tenemos en UI
   acne: "acne",
   redness: "redness",
   pores: "pores",
   pigmentation: "pigmentation",
-
-  // NUEVO: sagging & dark circles
   sagging: "sagging",
   dark_circles: "dark_circles",
-
-  // Soportar nombres antiguos si Haut aún usa hydration/translucency
   hydration: "sagging",
   translucency: "dark_circles",
-
-  // Haut "lines" → Bloom "Lines & Wrinkles"
   lines: "lines_wrinkles",
-
-  // otros que quizá usemos más adelante
   uniformness: "texture",
   quality: "image_quality",
   ita: "skin_tone",
@@ -76,41 +65,57 @@ const TECH_NAME_TO_SKIN_METRIC_ID: Record<string, string> = {
   skin_tone: "skin_tone",
 };
 
+// ---------- OpenAI Routine Types ----------
+type RoutineSectionId = "morning" | "evening" | "weekly";
+
+interface RoutineStep {
+  id: string;
+  title: string;
+  subtitle: string;
+  concerns: string[];
+  usageNotes?: string;
+}
+
+interface RoutineSection {
+  id: RoutineSectionId;
+  title: string;
+  steps: RoutineStep[];
+}
+
+interface BloomRoutineResponse {
+  summary: string;
+  mainConcerns: string[];
+  sections: RoutineSection[];
+  disclaimer: string;
+}
+
 export function WebResultsScreen({
   capturedImage,
   onViewDashboard,
 }: WebResultsScreenProps) {
   const [selectedMetric, setSelectedMetric] = useState<SkinMetric | null>(null);
 
-  // SHARE
   const [isShareOpen, setIsShareOpen] = useState(false);
-
-  // REF of the block we want to export to PDF
   const reportRef = useRef<HTMLDivElement | null>(null);
-
-  // Avoid double click on download
   const [isDownloading, setIsDownloading] = useState(false);
-
-  // Minimal data for share (later you can connect to real user email)
   const userEmail = "user@example.com";
 
-  // Active metric ONLY for the photo dropdown (por si luego lo usamos)
   const [activeMetricId, setActiveMetricId] = useState<string | null>(null);
-
-  // Metrics we actually display (start with static, then override with Haut values)
   const [displayMetrics, setDisplayMetrics] =
     useState<SkinMetric[]>(staticSkinMetrics);
 
-  // Overall health dinámico (Skin Type + Skin Age + Skin Tone reales con fallback al mock)
   const [dynamicOverallHealth, setDynamicOverallHealth] =
     useState(mockOverallHealth);
 
-  // Mapa: id de métrica → URL de la imagen con máscara de Haut (opcional, debug/futuro)
   const [metricMasks, setMetricMasks] = useState<
     Record<string, string | undefined>
   >({});
 
-  // Call Haut inference whenever we have a captured image
+  // ---- OpenAI Routine state ----
+  const [routine, setRoutine] = useState<BloomRoutineResponse | null>(null);
+  const [isLoadingRoutine, setIsLoadingRoutine] = useState(false);
+  const [routineError, setRoutineError] = useState<string | null>(null);
+
   const {
     status: hautStatus,
     result: hautResult,
@@ -176,7 +181,6 @@ export function WebResultsScreen({
     hautDarkCirclesMaskUrl = getMask("dark_circles");
   }
 
-  // Options for the photo dropdown (without skin_type)
   const metricOptionsForPhoto = displayMetrics
     .filter((m) => m.id !== SKIN_TYPE_ID)
     .map((m) => ({
@@ -187,14 +191,13 @@ export function WebResultsScreen({
     }));
 
   // ============================
-  // 1) Actualizar métricas (scores + status)
+  // 1) Actualizar métricas (scores + status + raw + biomarkers de Acne)
   // ============================
   useEffect(() => {
     if (!hautResult || !hautResult.metrics || hautResult.metrics.length === 0) {
       return;
     }
 
-    // 1) Actualizamos SCORE + STATUS (Good / Great / Average…)
     setDisplayMetrics((prev) => {
       const byId = new Map<string, SkinMetric>();
       prev.forEach((m) => byId.set(m.id, m));
@@ -202,24 +205,72 @@ export function WebResultsScreen({
       for (const m of hautResult.metrics) {
         const tech = (m.techName || "").toLowerCase();
         const mappedId = TECH_NAME_TO_SKIN_METRIC_ID[tech];
-
         if (!mappedId) continue;
 
         const existing = byId.get(mappedId);
         if (!existing) continue;
 
-        byId.set(mappedId, {
+        const isAcneMetric =
+          mappedId === "acne" ||
+          existing.name.toLowerCase().includes("acne") ||
+          tech === "acne";
+
+        // Empezamos creando la métrica actualizada con score, status y raw
+        let updated: SkinMetric = {
           ...existing,
           score: m.value ?? existing.score,
-          // AQUÍ usamos el tag de Haut (Great / Average / etc.)
           status: (m.tag as any) || existing.status,
-        });
+          // Guardamos SIEMPRE el raw de Haut por si luego lo queremos usar
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          raw: (m as any).raw ?? (existing as any).raw,
+        };
+
+        // 🔹 Si es la métrica de Acne, extraemos biomarcadores reales
+        if (isAcneMetric) {
+          const acneRaw: any = (m as any).raw || {};
+
+          console.log("[Bloom DEBUG] ACNE dynamic.raw:", acneRaw);
+
+          const pimplesCount =
+            acneRaw?.pimples?.count ??
+            acneRaw?.pimples_count ??
+            acneRaw?.number_of_pimples ??
+            acneRaw?.pimples?.number ??
+            undefined;
+
+          const acneDensity =
+            acneRaw?.acne_inflammation?.density ??
+            acneRaw?.density ??
+            undefined;
+
+          updated = {
+            ...updated,
+            biomarkers: [
+              {
+                label: "Number of pimples",
+                value:
+                  pimplesCount ??
+                  existing.biomarkers?.[0]?.value ??
+                  "—",
+              },
+              {
+                label: "Acne inflammation (density)",
+                value:
+                  acneDensity ??
+                  existing.biomarkers?.[1]?.value ??
+                  "—",
+              },
+            ],
+          };
+        }
+
+        byId.set(mappedId, updated);
       }
 
       return Array.from(byId.values());
     });
 
-    // 2) Guardamos las URLs de las máscaras para usarlas en el modal (debug / futuro)
+    // Mantengo esto por si en el futuro quieres usar maskUrl desde hautResult.metrics
     setMetricMasks((prevMasks) => {
       const next = { ...prevMasks };
 
@@ -272,6 +323,71 @@ export function WebResultsScreen({
     }));
   }, [displayMetrics]);
 
+  // Helper para mostrar bonito los concerns ("lines_wrinkles" → "Lines Wrinkles")
+  const formatConcernLabel = (id: string): string => {
+    return id
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+  };
+
+  // ============================
+  // 4) Generar rutina con OpenAI (backend /api/recommendations)
+  // ============================
+  useEffect(() => {
+    if (!hautResult || !hautResult.metrics || hautResult.metrics.length === 0) {
+      return;
+    }
+
+    const controller = new AbortController();
+
+    async function fetchRoutine() {
+      try {
+        setIsLoadingRoutine(true);
+        setRoutineError(null);
+
+        const skinMetricsPayload = hautResult.metrics.map((m: any) => ({
+          techName: m.techName,
+          value: m.value,
+          tag: m.tag,
+        }));
+
+        console.log("[Bloom Front] Calling /api/recommendations…");
+
+        const res = await fetch("/api/recommendations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            skinMetrics: skinMetricsPayload,
+            overallHealth: dynamicOverallHealth,
+          }),
+        });
+
+        if (!res.ok) {
+          console.error("[Bloom Front] /api/recommendations status", res.status);
+          throw new Error("Error al generar la rutina");
+        }
+
+        const data = (await res.json()) as BloomRoutineResponse;
+        console.log("[Bloom Front] Routine received:", data);
+
+        setRoutine(data);
+      } catch (error: any) {
+        if (error.name === "AbortError") return;
+        console.error("[Bloom Front] Error fetching routine", error);
+        setRoutineError(
+          "No hemos podido generar tu rutina personalizada ahora mismo. Volveremos a intentarlo en tu próximo escaneo."
+        );
+      } finally {
+        setIsLoadingRoutine(false);
+      }
+    }
+
+    fetchRoutine();
+
+    return () => controller.abort();
+  }, [hautResult, dynamicOverallHealth]);
+
   const handleDownloadReport = async () => {
     if (!reportRef.current || isDownloading) return;
 
@@ -285,7 +401,9 @@ export function WebResultsScreen({
     }
   };
 
-  // If there is no captured image, show a gentle fallback
+  // ============================
+  // Fallbacks (sin imagen / loading / error Haut)
+  // ============================
   if (!capturedImage) {
     return (
       <div className="min-h-screen bg-[#F5F5F5] flex items-center justify-center px-4">
@@ -314,13 +432,11 @@ export function WebResultsScreen({
     );
   }
 
-  // Loading state while Haut is processing
   if (isHautLoading) {
     const loadingImage = capturedImage || exampleImage;
     return <AnalyzingScreen imageUrl={loadingImage} />;
   }
 
-  // Error state if Haut failed
   if (hautStatus === "failed") {
     return (
       <div className="min-h-screen bg-[#F5F5F5] flex items-center justify-center px-4">
@@ -361,10 +477,11 @@ export function WebResultsScreen({
     );
   }
 
-  // Main UI with results (using displayMetrics which may include real Haut values)
+  // ============================
+  // MAIN UI
+  // ============================
   return (
     <>
-      {/* Everything we want to capture in the PDF goes inside this wrapper */}
       <div ref={reportRef} className="min-h-screen bg-[#F5F5F5]">
         {/* Header */}
         <div className="bg-white border-b border-[#E5E5E5] px-8 py-6 sticky top-0 z-10">
@@ -396,7 +513,6 @@ export function WebResultsScreen({
                 Go to Dashboard
               </Button>
 
-              {/* SHARE BUTTON */}
               <Button
                 type="button"
                 onClick={() => setIsShareOpen(true)}
@@ -406,7 +522,6 @@ export function WebResultsScreen({
                 Share
               </Button>
 
-              {/* DOWNLOAD BUTTON */}
               <Button
                 type="button"
                 onClick={handleDownloadReport}
@@ -467,23 +582,127 @@ export function WebResultsScreen({
           </div>
 
           {/* Personalized Recommendations / Routine */}
-          <div className="mb-8">
+          <div className="mb-10">
             <h2
-              className="text-[#18212D] mb-6 font-['Manrope',sans-serif]"
+              className="text-[#18212D] mb-4 font-['Manrope',sans-serif]"
               style={{ fontSize: "24px", lineHeight: "32px" }}
             >
               Personalized Skincare Routine
             </h2>
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {recommendations.map((routine, idx) => (
-                <RoutineCard key={idx} routine={routine} />
-              ))}
-            </div>
+
+            {isLoadingRoutine && (
+              <p className="text-sm text-[#6B7280] mb-4">
+                Generating your personalized routine...
+              </p>
+            )}
+
+            {routineError && !routine && (
+              <p className="text-sm text-red-500 mb-4">{routineError}</p>
+            )}
+
+            {routine && (
+              <div className="space-y-6">
+                {/* Resumen */}
+                {routine.summary && (
+                  <p className="text-sm text-[#4B5563] mb-2 max-w-3xl">
+                    {routine.summary}
+                  </p>
+                )}
+
+                {/* Tarjetas Morning / Evening / Weekly */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  {(["morning", "evening", "weekly"] as RoutineSectionId[]).map(
+                    (sectionId) => {
+                      const section = routine.sections.find(
+                        (s) => s.id === sectionId
+                      );
+                      if (!section) return null;
+
+                      const icon =
+                        sectionId === "morning"
+                          ? "☀️"
+                          : sectionId === "evening"
+                          ? "🌙"
+                          : "✨";
+
+                      const subtitle =
+                        sectionId === "morning"
+                          ? "Start your day with light, protective steps."
+                          : sectionId === "evening"
+                          ? "Support repair and renewal while you sleep."
+                          : "Targeted boosts to support your weekly routine.";
+
+                      return (
+                        <div
+                          key={section.id}
+                          className="bg-white rounded-2xl border border-[#E5E5E5] p-6 shadow-sm flex flex-col"
+                        >
+                          {/* Header sección (estilo RoutineCard) */}
+                          <div className="flex items-center gap-3 mb-4">
+                            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#FF6B4A] to-[#FFA94D] flex items-center justify-center">
+                              <span className="text-xl text-white">{icon}</span>
+                            </div>
+                            <div>
+                              <h3 className="text-[#18212D] font-['Manrope',sans-serif] font-semibold">
+                                {section.title}
+                              </h3>
+                              <p className="text-xs text-[#6B7280] font-['Manrope',sans-serif]">
+                                {subtitle}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Steps como bloques grises */}
+                          <div className="space-y-3">
+                            {section.steps.map((step) => (
+                              <div
+                                key={step.id}
+                                className="bg-[#F5F5F5] rounded-xl p-4"
+                              >
+                                <p className="text-sm font-medium text-[#111827] font-['Manrope',sans-serif]">
+                                  {step.title}
+                                </p>
+                                {step.subtitle && (
+                                  <p className="text-xs text-[#6B7280] mt-1 font-['Manrope',sans-serif]">
+                                    {step.subtitle}
+                                  </p>
+                                )}
+                              </div>
+                            ))}
+
+                            {section.steps.length === 0 && (
+                              <p className="text-xs text-[#9CA3AF] font-['Manrope',sans-serif]">
+                                This section will be updated as we learn more
+                                about your skin.
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    }
+                  )}
+                </div>
+
+                {routine.disclaimer && (
+                  <p className="mt-4 mb-10 text-[10px] italic text-[#9CA3AF] max-w-3xl">
+                    * {routine.disclaimer}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Fallback suave si por algún motivo no hay rutina ni error */}
+            {!routine && !isLoadingRoutine && !routineError && (
+              <p className="text-sm text-[#9CA3AF]">
+                We&apos;ll generate a personalized routine right after your next
+                scan.
+              </p>
+            )}
           </div>
 
           {/* CTA Dashboard */}
           {onViewDashboard && (
-            <div className="bg-gradient-to-br from-white to-orange-50/30 rounded-3xl border border-[#E5E5E5] p-12 text-center shadow-lg">
+            <div className="bg-gradient-to-br from-white to-orange-50/30 rounded-3xl border border-[#E5E5E5] p-12 text-center shadow-lg mt-10">
               <div className="w-20 h-20 rounded-full bg-gradient-to-br from-[#FF6B4A] to-[#FFA94D] flex items-center justify-center mx-auto mb-6">
                 <LayoutDashboard className="w-10 h-10 text-white" />
               </div>
@@ -510,9 +729,7 @@ export function WebResultsScreen({
         </div>
       </div>
 
-      {/* These go OUTSIDE the PDF wrapper */}
-
-      {/* Metric detail modal */}
+      {/* Modals fuera del wrapper PDF */}
       <MetricDetailModal
         metric={selectedMetric}
         onClose={() => setSelectedMetric(null)}
@@ -527,7 +744,6 @@ export function WebResultsScreen({
         hautDarkCirclesMaskUrl={hautDarkCirclesMaskUrl}
       />
 
-      {/* SHARE MODAL */}
       <ShareModal
         isOpen={isShareOpen}
         onClose={() => setIsShareOpen(false)}

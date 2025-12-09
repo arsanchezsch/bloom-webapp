@@ -1,29 +1,10 @@
 // src/services/fakeBackend.ts
 
-import type { ConsultationData } from "../App";
+const CONSULTATIONS_KEY = "bloom_consultations_v1";
+const SCANS_KEY = "bloom_scans_v1";
+const PATIENTS_KEY = "bloom_patients";
 
-export type ScanSource = "camera" | "upload";
-
-export interface ConsultationRecord extends ConsultationData {
-  id: string;
-  createdAt: string; // ISO date
-}
-
-export interface ScanRecord {
-  id: string;
-  consultationId?: string;
-  imageData: string; // base64 image
-  source: ScanSource;
-  createdAt: string;
-}
-
-const STORAGE_KEYS = {
-  CONSULTATIONS: "bloom_consultations",
-  SCANS: "bloom_scans",
-} as const;
-
-// Utils
-function loadArray<T>(key: string): T[] {
+function readArray<T = any>(key: string): T[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(key);
@@ -34,83 +15,104 @@ function loadArray<T>(key: string): T[] {
   }
 }
 
-function saveArray<T>(key: string, value: T[]) {
+function writeArray(key: string, value: any[]) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(key, JSON.stringify(value));
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // ignore
+  }
 }
 
 function generateId(prefix: string) {
-  return `${prefix}_${Math.random().toString(36).slice(2, 9)}_${Date.now()}`;
+  return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
-// API pública del "backend"
 export const fakeBackend = {
-  // 🧍 Consulta inicial (intake)
-  async saveConsultation(data: ConsultationData): Promise<ConsultationRecord> {
-    const consultations = loadArray<ConsultationRecord>(
-      STORAGE_KEYS.CONSULTATIONS
-    );
+  // Guarda la consulta y registra/actualiza paciente
+  async saveConsultation(data: any) {
+    const consultations = readArray(CONSULTATIONS_KEY);
 
-    const record: ConsultationRecord = {
+    const id = data.id || generateId("consultation");
+    const createdAt = new Date().toISOString();
+
+    const consultation = {
       ...data,
-      id: generateId("consult"),
-      createdAt: new Date().toISOString(),
+      id,
+      createdAt,
     };
 
-    consultations.push(record);
-    saveArray(STORAGE_KEYS.CONSULTATIONS, consultations);
+    consultations.push(consultation);
+    writeArray(CONSULTATIONS_KEY, consultations);
 
-    return record;
+    // Actualizar lista de pacientes para el DoctorHomeScreen
+    const patients = readArray(PATIENTS_KEY);
+    const patientIndex = patients.findIndex(
+      (p: any) => p.email && data.email && p.email === data.email
+    );
+
+    const patient = {
+      id, // usamos id de la última consulta como id del paciente
+      fullName: data.fullName || "Patient",
+      email: data.email || "",
+      skinType: data.skinType || "Unknown",
+      age: data.age || "",
+      timestamp: createdAt,
+    };
+
+    if (patientIndex >= 0) {
+      patients[patientIndex] = { ...patients[patientIndex], ...patient };
+    } else {
+      patients.push(patient);
+    }
+
+    writeArray(PATIENTS_KEY, patients);
+
+    return consultation;
   },
 
-  async getLatestConsultation(): Promise<ConsultationRecord | null> {
-    const consultations = loadArray<ConsultationRecord>(
-      STORAGE_KEYS.CONSULTATIONS
-    );
+  // Guarda el scan
+  async saveScan(scan: { imageData: string; source?: string; consultationId?: string }) {
+    const scans = readArray(SCANS_KEY);
+    const id = generateId("scan");
+    const createdAt = new Date().toISOString();
+
+    const storedScan = {
+      ...scan,
+      id,
+      createdAt,
+    };
+
+    scans.push(storedScan);
+    writeArray(SCANS_KEY, scans);
+
+    return storedScan;
+  },
+
+  async getLastConsultation() {
+    const consultations = readArray(CONSULTATIONS_KEY);
     if (!consultations.length) return null;
     return consultations[consultations.length - 1];
   },
 
-  async getAllConsultations(): Promise<ConsultationRecord[]> {
-    return loadArray<ConsultationRecord>(STORAGE_KEYS.CONSULTATIONS);
-  },
-
-  // 📸 Scans
-  async saveScan(params: {
-    imageData: string;
-    source: ScanSource;
-    consultationId?: string;
-  }): Promise<ScanRecord> {
-    const scans = loadArray<ScanRecord>(STORAGE_KEYS.SCANS);
-
-    const record: ScanRecord = {
-      id: generateId("scan"),
-      imageData: params.imageData,
-      source: params.source,
-      consultationId: params.consultationId,
-      createdAt: new Date().toISOString(),
-    };
-
-    scans.push(record);
-    saveArray(STORAGE_KEYS.SCANS, scans);
-
-    return record;
-  },
-
-  async getScansByConsultation(
-    consultationId: string
-  ): Promise<ScanRecord[]> {
-    const scans = loadArray<ScanRecord>(STORAGE_KEYS.SCANS);
-    return scans.filter((s) => s.consultationId === consultationId);
-  },
-
-  async getAllScans(): Promise<ScanRecord[]> {
-    return loadArray<ScanRecord>(STORAGE_KEYS.SCANS);
-  },
-
-  async getLatestScan(): Promise<ScanRecord | null> {
-    const scans = loadArray<ScanRecord>(STORAGE_KEYS.SCANS);
+  async getLastScan() {
+    const scans = readArray(SCANS_KEY);
     if (!scans.length) return null;
     return scans[scans.length - 1];
+  },
+
+  // 🔍 Para ir al dashboard de un paciente concreto
+  async getConsultationById(id: string) {
+    const consultations = readArray(CONSULTATIONS_KEY);
+    return consultations.find((c: any) => c.id === id) || null;
+  },
+
+  // Utilidades opcionales
+  async getConsultations() {
+    return readArray(CONSULTATIONS_KEY);
+  },
+
+  async getPatients() {
+    return readArray(PATIENTS_KEY);
   },
 };
