@@ -35,7 +35,7 @@ async function callBackendInference(
   imageData: string,
   subjectName: string
 ): Promise<{ ids: HautScanIdentifiers; rawResults: any[] }> {
-  const response = await fetch("http://localhost:8787/api/haut-inference", {
+  const response = await fetch("/api/haut-inference", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
