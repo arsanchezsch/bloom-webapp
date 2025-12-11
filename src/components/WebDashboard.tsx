@@ -77,6 +77,18 @@ interface WebDashboardProps {
 
 type TabType = "progress" | "chat" | "recommendations" | "patient-profile";
 
+type ChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: Date;
+  image?: string;
+};
+
+const BLOOM_SERVER_URL =
+  import.meta.env.VITE_BLOOM_SERVER_URL || "http://localhost:8787";
+
+
 // Mock data for progress tracking (por ahora)
 const progressData = [
   { date: "Week 1", acne: 65, hydration: 78, pores: 55, overall: 66 },
@@ -119,10 +131,17 @@ export function WebDashboard({
   onTakeNewScan,
 }: WebDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>(initialTab);
-  const [messages, setMessages] = useState(initialMessages);
-  const [inputValue, setInputValue] = useState("");
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const profilePhotoInputRef = useRef<HTMLInputElement>(null);
+
+// Chat state
+const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
+const [inputValue, setInputValue] = useState("");
+const [isSending, setIsSending] = useState(false);
+const [chatError, setChatError] = useState<string | null>(null);
+
+const fileInputRef = useRef<HTMLInputElement>(null);
+const profilePhotoInputRef = useRef<HTMLInputElement>(null);
+const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
 
   const [showDoctorModal, setShowDoctorModal] = useState(false);
 
@@ -131,6 +150,13 @@ export function WebDashboard({
     fullName: "Doctor",
     email: "",
   });
+
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, isSending]);
+  
 
   useEffect(() => {
     try {
@@ -349,64 +375,163 @@ const [routineUpdatedAt, setRoutineUpdatedAt] = useState<string | null>(null);
     setIsEditingCurrentProducts(false);
   };
 
-  const handleSendMessage = (messageText?: string) => {
-    const textToSend = messageText || inputValue;
-    if (!textToSend.trim()) return;
+  // Preguntas sugeridas dinámicas en función del último scan y el perfil
+const buildSuggestedQuestions = (): string[] => {
+  const concernsFromRoutine = routine?.mainConcerns ?? [];
+  const concernsFromProfile = mainConcerns || [];
 
-    const userMessage = {
-      id: Date.now().toString(),
-      role: "user" as const,
-      content: textToSend,
+  const allConcerns = [...concernsFromRoutine, ...concernsFromProfile]
+    .map((c) => c.toLowerCase())
+    .filter(Boolean);
+
+  const unique = Array.from(new Set(allConcerns));
+
+  const pretty = (c: string) =>
+    c
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (ch) => ch.toUpperCase());
+
+  if (!unique.length) {
+    // fallback a tus preguntas genéricas
+    return [
+      "What products should I use for my acne?",
+      "How can I improve my skin hydration?",
+      "What's the best routine for my skin type?",
+      "How often should I exfoliate?",
+    ];
+  }
+
+  const main = unique[0];
+  const secondary = unique[1];
+
+  const q1 = main
+    ? `What is the best routine to improve my ${pretty(main)}?`
+    : "What is the best routine for my skin right now?";
+
+  const q2 = secondary
+    ? `Which ingredients should I look for if I want to treat ${pretty(
+        secondary
+      )}?`
+    : "Which ingredients are best for strengthening my skin barrier?";
+
+  const q3 = main
+    ? `How can I track progress for my ${pretty(
+        main
+      )} over the next few weeks?`
+    : "How can I track my skin progress with Bloom scans?";
+
+  return [q1, q2, q3];
+};
+
+// Se recalculan en cada render con el contexto actual
+const dynamicSuggestedQuestions = buildSuggestedQuestions();
+
+// Contexto que se manda al backend para personalizar el chat
+const buildSkinContext = () => {
+  return {
+    metrics: latestMetrics ?? skinMetrics,
+    overallHealth: latestOverallHealth ?? overallHealth,
+    profile: {
+      skinType,
+      mainConcerns,
+      age: userAge,
+      allergies,
+      currentProducts,
+    },
+  };
+};
+
+const handleSendMessage = async (messageText?: string) => {
+  const textToSend = messageText ?? inputValue;
+  if (!textToSend.trim() || isSending) return;
+
+  const userMessage: ChatMessage = {
+    id: Date.now().toString(),
+    role: "user",
+    content: textToSend,
+    timestamp: new Date(),
+  };
+
+  // pintamos mensaje usuario
+  setMessages((prev) => [...prev, userMessage]);
+  setInputValue("");
+  setChatError(null);
+  setIsSending(true);
+
+  try {
+    // histórico para el backend (solo texto + nota si había imagen)
+    const backendMessages = [...messages, userMessage].map((m) => ({
+      role: m.role,
+      content:
+        m.content +
+        (m.image ? " (Note: the user also uploaded a new skin photo.)" : ""),
+    }));
+
+    const payload = {
+      messages: backendMessages,
+      skinContext: buildSkinContext(),
+    };
+
+    const response = await fetch(`${BLOOM_SERVER_URL}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      throw new Error("Chat request failed");
+    }
+
+    const data = await response.json();
+
+    const aiMessage: ChatMessage = {
+      id: (Date.now() + 1).toString(),
+      role: "assistant",
+      content:
+        data.reply ||
+        "I'm having trouble accessing your skin data right now, but I can still give you general cosmetic advice.",
       timestamp: new Date(),
     };
 
-    setMessages((prev) => [...prev, userMessage]);
-    setInputValue("");
+    setMessages((prev) => [...prev, aiMessage]);
+  } catch (error) {
+    console.error("[Bloom Web] Chat error", error);
+    setChatError(
+      "There was a problem connecting to Bloom AI. Please try again in a moment."
+    );
+  } finally {
+    setIsSending(false);
+  }
+};
 
-    // Simulate AI response
-    setTimeout(() => {
-      const aiMessage = {
-        id: (Date.now() + 1).toString(),
-        role: "assistant" as const,
+
+const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const file = e.target.files?.[0];
+  if (file) {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const imageData = reader.result as string;
+
+      const imageMessage: ChatMessage = {
+        id: Date.now().toString(),
+        role: "user",
         content:
-          "Thanks for your question! Based on your skin analysis, I recommend focusing on consistent hydration and gentle exfoliation. Your acne score has improved by 10 points this month!",
+          "I've uploaded a new skin photo. Please take it into account when giving advice.",
+        image: imageData,
         timestamp: new Date(),
       };
-      setMessages((prev) => [...prev, aiMessage]);
-    }, 1000);
-  };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const imageData = reader.result as string;
+      // mostramos la foto en el chat
+      setMessages((prev) => [...prev, imageMessage]);
 
-        const imageMessage = {
-          id: Date.now().toString(),
-          role: "user" as const,
-          content: "I uploaded a photo for analysis",
-          image: imageData,
-          timestamp: new Date(),
-        };
-
-        setMessages((prev) => [...prev, imageMessage]);
-
-        setTimeout(() => {
-          const aiMessage = {
-            id: (Date.now() + 1).toString(),
-            role: "assistant" as const,
-            content:
-              "Thanks for sharing your photo! I can see some areas that need attention. Based on this image, I recommend focusing on gentle cleansing and hydration. Would you like specific product recommendations?",
-            timestamp: new Date(),
-          };
-          setMessages((prev) => [...prev, aiMessage]);
-        }, 1500);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
+      // disparamos una pregunta automática para que el modelo responda
+      handleSendMessage(
+        "I just uploaded a new skin photo. Can you review my main concerns based on my latest analysis?"
+      );
+    };
+    reader.readAsDataURL(file);
+  }
+};
 
   const handleProfilePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -576,105 +701,143 @@ const [routineUpdatedAt, setRoutineUpdatedAt] = useState<string | null>(null);
         <div className="flex-1 overflow-y-auto">
           {/* Chat Tab */}
           {activeTab === "chat" && (
-            <div className="h-full flex flex-col">
-              {/* Messages Area */}
-              <div className="flex-1 overflow-y-auto p-8 space-y-4">
-                {messages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={`flex ${
-                      message.role === "user" ? "justify-end" : "justify-start"
-                    }`}
-                  >
-                    <div
-                      className={`max-w-2xl rounded-2xl px-6 py-4 ${
-                        message.role === "user"
-                          ? "bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] text-white"
-                          : "bg-white border border-[#E5E5E5]"
-                      }`}
-                    >
-                      {(message as any).image && (
-                        <img
-                          src={(message as any).image}
-                          alt="Uploaded"
-                          className="rounded-xl mb-3 max-w-sm"
-                        />
-                      )}
-                      <p className="text-sm font-['Manrope',sans-serif]">
-                        {message.content}
-                      </p>
-                      <div
-                        className={`text-xs mt-2 ${
-                          message.role === "user"
-                            ? "text-white/70"
-                            : "text-[#6B7280]"
-                        } font-['Manrope',sans-serif]`}
-                      >
-                        {message.timestamp.toLocaleTimeString("en-US", {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-
-                {/* Suggested Questions */}
-                {messages.length <= 1 && (
-                  <div className="pt-4">
-                    <p className="text-sm text-[#6B7280] mb-3 font-['Manrope',sans-serif]">
-                      Try asking:
-                    </p>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {suggestedQuestions.map((question, idx) => (
-                        <button
-                          key={idx}
-                          onClick={() => handleSendMessage(question)}
-                          className="text-left bg-white border border-[#E5E5E5] rounded-xl px-4 py-3 text-sm text-[#6B7280] hover:border-[#FF6B4A] hover:text-[#FF6B4A] hover:bg-[#FFF5F3] transition-all font-['Manrope',sans-serif]"
-                        >
-                          {question}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Input Area */}
-              <div className="bg-white border-t border-[#E5E5E5] p-6">
-                <div className="max-w-4xl mx-auto flex gap-3">
-                  <input
-                    type="text"
-                    value={inputValue}
-                    onChange={(e) => setInputValue(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
-                    placeholder="Ask anything about your skin..."
-                    className="flex-1 h-14 bg-[#F5F5F5] rounded-xl px-6 text-[#18212D] placeholder:text-[#6B7280] border border-[#E5E5E5] focus:outline-none focus:border-[#FF6B4A] transition-colors font-['Manrope',sans-serif]"
-                  />
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                  />
-                  <Button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="h-14 w-14 bg-white hover:bg-[#F5F5F5] text-[#6B7280] hover:text-[#FF6B4A] rounded-xl border border-[#E5E5E5] font-['Manrope',sans-serif] flex items-center justify-center p-0"
-                  >
-                    <Plus className="w-5 h-5" />
-                  </Button>
-                  <Button
-                    onClick={() => handleSendMessage()}
-                    disabled={!inputValue.trim()}
-                    className="h-14 px-8 bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] hover:from-[#E74C3C] hover:to-[#FF8C42] text-white rounded-xl shadow-lg border-0 disabled:opacity-50 font-['Manrope',sans-serif]"
-                  >
-                    <Send className="w-5 h-5" />
-                  </Button>
-                </div>
-              </div>
+  <div className="h-full flex flex-col">
+    {/* Messages Area */}
+    <div className="flex-1 overflow-y-auto p-8 space-y-4">
+      {messages.map((message) => (
+        <div
+          key={message.id}
+          className={`flex ${
+            message.role === "user" ? "justify-end" : "justify-start"
+          }`}
+        >
+          <div
+            className={`max-w-2xl rounded-2xl px-6 py-4 ${
+              message.role === "user"
+                ? "bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] text-white"
+                : "bg-white border border-[#E5E5E5]"
+            }`}
+          >
+            {message.image && (
+              <img
+                src={message.image}
+                alt="Uploaded"
+                className="rounded-xl mb-3 max-w-sm"
+              />
+            )}
+            <p className="text-sm font-['Manrope',sans-serif] whitespace-pre-line">
+              {message.content}
+            </p>
+            <div
+              className={`text-xs mt-2 ${
+                message.role === "user"
+                  ? "text-white/70"
+                  : "text-[#6B7280]"
+              } font-['Manrope',sans-serif]`}
+            >
+              {message.timestamp.toLocaleTimeString("en-US", {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
             </div>
-          )}
+          </div>
+        </div>
+      ))}
+
+      {/* Indicador de carga (tres puntitos) */}
+      {isSending && !chatError && (
+        <div className="flex justify-start">
+          <div className="max-w-xs rounded-2xl px-4 py-3 bg-white border border-[#E5E5E5]">
+            <div className="flex items-center gap-2">
+              {[0, 1, 2].map((dot) => (
+                <span
+                  key={dot}
+                  className="w-2.5 h-2.5 rounded-full bg-[#FF6B4A] animate-pulse"
+                  style={{ animationDelay: `${dot * 0.2}s` }}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Preguntas sugeridas dinámicas */}
+      {messages.length <= 1 && (
+        <div className="pt-4">
+          <p className="text-sm text-[#6B7280] mb-3 font-['Manrope',sans-serif]">
+            Try asking:
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {dynamicSuggestedQuestions.map((question, idx) => (
+              <button
+                key={idx}
+                onClick={() => handleSendMessage(question)}
+                className="text-left bg-white border border-[#E5E5E5] rounded-xl px-4 py-3 
+                  text-sm text-[#6B7280] hover:border-[#FF6B4A] hover:text-[#FF6B4A] 
+                  hover:bg-[#FFF5F3] transition-all font-['Manrope',sans-serif]"
+              >
+                {question}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Ancla para el auto-scroll */}
+      <div ref={messagesEndRef} />
+    </div>
+
+    {/* Input Area */}
+    <div className="bg-white border-t border-[#E5E5E5] p-6">
+      <div className="max-w-4xl mx-auto flex gap-3">
+        <input
+          type="text"
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
+          placeholder="Ask anything about your skin..."
+          className="flex-1 h-14 bg-[#F5F5F5] rounded-xl px-6 text-[#18212D] 
+            placeholder:text-[#6B7280] border border-[#E5E5E5] 
+            focus:outline-none focus:border-[#FF6B4A] transition-colors 
+            font-['Manrope',sans-serif]"
+        />
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleFileUpload}
+          className="hidden"
+        />
+
+<Button
+  onClick={() => fileInputRef.current?.click()}
+  className="h-14 w-14 bg-white hover:bg-[#F5F5F5] 
+    rounded-xl border border-[#E5E5E5] 
+    font-['Manrope',sans-serif] flex items-center justify-center p-0"
+>
+  <Plus className="w-5 h-5 text-[#FF6B4A]" />
+</Button>
+
+        <Button
+          onClick={() => handleSendMessage()}
+          disabled={!inputValue.trim() || isSending}
+          className="h-14 px-8 bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] 
+            hover:from-[#E74C3C] hover:to-[#FF8C42] text-white rounded-xl shadow-lg 
+            border-0 disabled:opacity-50 font-['Manrope',sans-serif]"
+        >
+          <Send className="w-5 h-5" />
+        </Button>
+      </div>
+
+      {chatError && (
+        <p className="mt-3 text-xs text-[#EF4444] font-['Manrope',sans-serif]">
+          {chatError}
+        </p>
+      )}
+    </div>
+  </div>
+)}
 
           {/* Progress Tab */}
           {activeTab === "progress" && (

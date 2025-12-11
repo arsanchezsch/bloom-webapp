@@ -10,6 +10,13 @@ const OpenAI = require("openai");
 dotenv.config({ path: ".env.local" });
 
 console.log(
+  "[DEBUG] ENV LOADED → ",
+  Object.keys(process.env).filter(
+    (k) => k.includes("OPENAI") || k.includes("LIQA")
+  )
+);
+console.log("[DEBUG] OPENAI KEY RAW →", process.env.OPENAI_API_KEY);
+console.log(
   "[DEBUG] OPENAI_API_KEY está cargada?",
   !!process.env.OPENAI_API_KEY
 );
@@ -24,14 +31,14 @@ const PORT = process.env.PORT || 8787;
 const HAUT_BASE_V1 = "https://saas.haut.ai/api/v1";
 const HAUT_BASE_V3 = "https://saas.haut.ai/api/v3";
 
-const API_KEY = process.env.VITE_HAUT_API_KEY;
-const COMPANY_ID = process.env.VITE_HAUT_COMPANY_ID;
-const DATASET_ID = process.env.VITE_HAUT_DATASET_ID;
+const API_KEY = process.env.HAUT_API_KEY;
+const COMPANY_ID = process.env.HAUT_COMPANY_ID;
+const DATASET_ID = process.env.HAUT_DATASET_ID;
 
 // OpenAI client (Bloom recommendations / chat)
+// 👉 Solo apiKey, SIN "project", porque estás usando un secret key normal (sk-...)
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-  project: process.env.OPENAI_PROJECT_ID,
+  apiKey: process.env.OPENAI_API_KEY?.trim(),
 });
 
 if (!API_KEY || !COMPANY_ID || !DATASET_ID) {
@@ -315,13 +322,88 @@ app.post("/api/openai-recommendations", async (req, res) => {
 // OPENAI: BLOOM SKINCARE ROUTINE (JSON SIMPLE)
 // ============================================
 app.post("/api/recommendations", async (req, res) => {
+  const schemaExample = {
+    summary:
+      "We detected some imbalances in your skin barrier and will focus on gentle cleansing, hydration and protection.",
+    mainConcerns: ["acne", "pores", "lines_wrinkles"],
+    sections: [
+      {
+        id: "morning",
+        title: "Morning Routine",
+        steps: [
+          {
+            id: "cleanser",
+            title: "Gentle Cleanser",
+            subtitle: "Cleanses without stripping the skin barrier.",
+            concerns: ["acne", "pores"],
+            usageNotes: "Use every morning on damp skin.",
+          },
+          {
+            id: "moisturizer",
+            title: "Light Moisturizer",
+            subtitle: "Keeps skin hydrated and comfortable.",
+            concerns: ["lines_wrinkles"],
+            usageNotes: "Apply after cleanser while skin is slightly damp.",
+          },
+          {
+            id: "sunscreen",
+            title: "Broad-Spectrum SPF",
+            subtitle: "Protects against daily UV damage.",
+            concerns: ["pigmentation", "lines_wrinkles"],
+            usageNotes: "Use every morning as the last step of your routine.",
+          },
+        ],
+      },
+      {
+        id: "evening",
+        title: "Evening Routine",
+        steps: [
+          {
+            id: "double_cleanse",
+            title: "Thorough Cleanse",
+            subtitle: "Removes sunscreen, sweat and excess oil.",
+            concerns: ["acne", "pores"],
+          },
+          {
+            id: "treatment",
+            title: "Targeted Treatment",
+            subtitle: "Use a gentle serum adapted to your main concerns.",
+            concerns: ["acne", "pores", "lines_wrinkles"],
+          },
+          {
+            id: "night_cream",
+            title: "Repairing Moisturizer",
+            subtitle: "Supports overnight skin recovery.",
+            concerns: ["lines_wrinkles"],
+          },
+        ],
+      },
+      {
+        id: "weekly",
+        title: "Weekly Treatments",
+        steps: [
+          {
+            id: "exfoliation",
+            title: "Gentle Exfoliation",
+            subtitle: "Smooths texture and unclogs pores.",
+            concerns: ["pores", "acne"],
+            usageNotes: "Use 1–2 times per week, never on irritated skin.",
+          },
+        ],
+      },
+    ],
+    disclaimer:
+      "This routine is cosmetic advice only and does not replace a visit to a dermatologist.",
+  };
+
   try {
     const { skinMetrics, overallHealth } = req.body || {};
 
     if (!Array.isArray(skinMetrics) || skinMetrics.length === 0) {
-      return res
-        .status(400)
-        .json({ error: "skinMetrics array is required for recommendations" });
+      console.warn(
+        "[Bloom OpenAI] /api/recommendations called without skinMetrics. Returning fallback schema."
+      );
+      return res.status(200).json(schemaExample);
     }
 
     console.log("[Bloom OpenAI] /api/recommendations called");
@@ -332,148 +414,156 @@ app.post("/api/recommendations", async (req, res) => {
       overallHealth
     );
 
-    // 👉 Estructura que queremos que devuelva el modelo
-    const schemaExample = {
-      summary:
-        "Short overview of the skin situation and what the routine will focus on.",
-      mainConcerns: ["acne", "pores", "lines_wrinkles"],
-      sections: [
-        {
-          id: "morning",
-          title: "Morning Routine",
-          steps: [
-            {
-              id: "cleanser",
-              title: "Gentle Cleanser",
-              subtitle: "Maintain barrier function",
-              concerns: ["acne", "pores"],
-              usageNotes: "Use every morning on damp skin."
-            }
-          ]
-        },
-        {
-          id: "evening",
-          title: "Evening Routine",
-          steps: []
-        },
-        {
-          id: "weekly",
-          title: "Weekly Treatments",
-          steps: []
-        }
-      ],
-      disclaimer:
-        "This routine is cosmetic advice only and does not replace a visit to a dermatologist."
-    };
-
     const inputText = `
-    You are Bloom, an expert skincare assistant for a digital skin-analysis product.
-    
-    User data:
-    - Dynamic overall health object (may be partial):
-    ${JSON.stringify(overallHealth || {}, null, 2)}
-    
-    - Raw Haut metrics from the last scan (array with techName, value, tag):
-    ${JSON.stringify(skinMetrics, null, 2)}
-    
-    TASK:
-    Create a personalized skincare routine.
-    
-    ANALYSIS RULES:
-    - First, carefully analyze the metrics to identify the 2–4 WORST concerns.
-    - "Worst" means lower numeric scores and/or tags like "Bad" or their equivalents.
-    - Give special priority to classic concerns: acne, pores, redness, pigmentation, lines_wrinkles, sagging, dark_circles when they appear among the worst metrics.
-    - The 2–4 worst concerns you identify will be your "mainConcerns".
-    
-    OUTPUT RULES:
-    - Answer ONLY with valid JSON.
-    - Do NOT include backticks, markdown, or explanations.
-    - The JSON MUST follow exactly this structure (same keys, but with your own values):
-    
-    ${JSON.stringify(schemaExample, null, 2)}
-    
-    DETAILS:
-    - summary:
-      - 1–3 short sentences explaining the overall situation and what the routine will focus on.
-      - The FIRST sentence MUST explicitly mention the mainConcerns in natural language (e.g. "acne and sagging", "redness, pores and lines").
-      - If any acne-related metric is among the worst, you MUST mention acne in the summary.
-    - mainConcerns:
-      - Array of 2–4 concern IDs in snake_case (e.g. "lines_wrinkles", "pores", "acne").
-      - These MUST correspond to the 2–4 worst concerns you identified above.
-    - sections:
-      - Always 3 items with ids "morning", "evening" and "weekly".
-      - Each section has 3–5 steps for morning, 3–5 for evening, 2–4 for weekly.
-      - step.title <= 30 characters.
-      - step.subtitle <= 80 characters.
-      - concerns: array of concern IDs this step helps with (reuse the same concern ids as in mainConcerns where relevant, but you can also include others if it makes sense).
-    - disclaimer:
-      - Brief safety note reminding the user this is not medical advice.
-    
-    If data is incomplete, make safe, generic assumptions.
-    Keep the JSON as compact as possible (short subtitles and usageNotes).
-    `;    
+You are Bloom, an expert skincare assistant for a digital skin-analysis product.
 
-const response = await openai.responses.create({
-  model: "gpt-4.1-mini",
-  input: inputText,
-  // Más margen para que no corte el JSON a la mitad
-  max_output_tokens: 2000,
-});
+User data:
+- Dynamic overall health object (may be partial):
+${JSON.stringify(overallHealth || {}, null, 2)}
 
-    // 🔎 Intentamos sacar el texto de la forma más robusta posible
+- Raw Haut metrics from the last scan (array with techName, value, tag):
+${JSON.stringify(skinMetrics, null, 2)}
+
+TASK:
+Create a personalized skincare routine.
+...
+    `.trim();
+
+    const response = await openai.responses.create({
+      model: "gpt-4.1-mini",
+      input: inputText,
+      max_output_tokens: 2000,
+    });
+
     const rawText =
       response.output_text ||
       response.output?.[0]?.content?.[0]?.text ||
       "";
 
-      console.log("[Bloom OpenAI] Raw text from model:", rawText);
+    console.log("[Bloom OpenAI] Raw text from model:", rawText);
 
-      let jsonPayload;
-  
-      try {
-        // Intento normal
-        jsonPayload = JSON.parse(rawText);
-      } catch (e) {
-        console.error("[Bloom OpenAI] Could not parse JSON (first try):", e);
-  
-        // 👇 Intento 2: recortar hasta el último "}" por si el modelo cortó el final
-        const lastBrace = rawText.lastIndexOf("}");
-        if (lastBrace !== -1) {
-          const trimmed = rawText.slice(0, lastBrace + 1);
-          try {
-            jsonPayload = JSON.parse(trimmed);
-            console.log(
-              "[Bloom OpenAI] JSON parsed OK after trimming trailing content"
-            );
-          } catch (inner) {
-            console.error(
-              "[Bloom OpenAI] Could not parse JSON even after trimming:",
-              inner
-            );
-          }
-        }
-  
-        // 👇 Si sigue sin poder parsear, caemos a una rutina genérica
-        if (!jsonPayload) {
-          console.warn(
-            "[Bloom OpenAI] Falling back to generic routine schemaExample"
+    let jsonPayload;
+
+    try {
+      jsonPayload = JSON.parse(rawText);
+    } catch (e) {
+      console.error("[Bloom OpenAI] Could not parse JSON (first try):", e);
+      const lastBrace = rawText.lastIndexOf("}");
+      if (lastBrace !== -1) {
+        const trimmed = rawText.slice(0, lastBrace + 1);
+        try {
+          jsonPayload = JSON.parse(trimmed);
+          console.log(
+            "[Bloom OpenAI] JSON parsed OK after trimming trailing content"
           );
-          jsonPayload = schemaExample;
+        } catch (inner) {
+          console.error(
+            "[Bloom OpenAI] Could not parse JSON even after trimming:",
+            inner
+          );
         }
       }
-  
-      console.log("[Bloom OpenAI] JSON payload generated OK");  
 
+      if (!jsonPayload) {
+        console.warn(
+          "[Bloom OpenAI] Falling back to generic routine schemaExample"
+        );
+        jsonPayload = schemaExample;
+      }
+    }
+
+    console.log("[Bloom OpenAI] JSON payload generated OK");
     return res.status(200).json(jsonPayload);
   } catch (error) {
     console.error("[Bloom OpenAI] Error in /api/recommendations:", {
       message: error.message,
       status: error.status,
-      details: error.details
+      details: error.details,
     });
 
-    return res.status(500).json({
-      error: "Error generating routine with OpenAI"
+    return res.status(200).json(schemaExample);
+  }
+});
+
+// ============================================
+// OPENAI: BLOOM AI CHAT
+// ============================================
+app.post("/api/chat", async (req, res) => {
+  try {
+    const { messages, skinContext } = req.body || {};
+
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "messages array is required" });
+    }
+
+    const historyText = messages
+      .map((m) => {
+        const speaker = m.role === "assistant" ? "Bloom" : "User";
+        return `${speaker}: ${m.content}`;
+      })
+      .join("\n");
+
+    const contextText = JSON.stringify(skinContext || {}, null, 2);
+
+    const inputText = `
+You are Bloom, an expert AI skincare assistant. 
+Always answer in **English**, with a calm, minimal, and clear tone.
+
+### FORMATTING RULES
+- Write **2 to 4 short paragraphs**.
+- Each paragraph must be **1–3 concise sentences**.
+- Always insert a **blank line between paragraphs**.
+- Avoid long blocks of text. Keep responses readable and elegant.
+
+### DATA RULES
+- ALWAYS use the latest skinContext values provided below.
+- If the user asks about a metric (skin age, acne score, redness, pores, etc.), answer based on the actual scan values.
+- Do NOT invent numbers. Use ONLY metrics that exist.
+- If something is missing, give a safe general explanation.
+- Do NOT mention Haut.AI, algorithms, scoring systems or internal terms.
+
+### SKIN CONTEXT (latest scan):
+${contextText}
+
+### CHAT HISTORY:
+${historyText}
+
+### TASK
+Respond to the user's LAST message using the real scan data.
+Keep the tone warm, supportive and professional.
+`.trim();
+
+
+    const response = await openai.responses.create({
+      model: "gpt-4.1-mini",
+      input: inputText,
+      max_output_tokens: 600,
+    });
+
+    const reply =
+      response.output_text ||
+      response.output?.[0]?.content?.[0]?.text ||
+      "Ahora mismo tengo un problema para procesar tus datos de piel, pero puedo darte consejos cosméticos generales.";
+
+    return res.status(200).json({ ok: true, reply });
+  } catch (error) {
+    console.error("[Bloom OpenAI] Error in /api/chat:", {
+      message: error.message,
+      status: error.status,
+      details: error.details,
+    });
+
+    // ⚠️ IMPORTANTE: nunca devolvemos 500 al frontend; damos fallback
+    const fallbackReply =
+      "Ahora mismo tengo un problema para acceder a todos tus datos de piel, pero puedo darte un consejo general: prioriza una limpieza suave, hidratación constante y protector solar diario. Si notas irritación, simplifica la rutina.";
+
+    return res.status(200).json({
+      ok: true,
+      reply: fallbackReply,
+      error:
+        "OpenAI error interno, se devolvió una respuesta genérica en su lugar.",
     });
   }
 });
@@ -483,6 +573,6 @@ const response = await openai.responses.create({
 // ============================================
 app.listen(PORT, () => {
   console.log(
-    `Bloom backend running on http://localhost:${PORT} (POST /api/haut-inference, /api/openai-recommendations, /api/recommendations)`
+    `Bloom backend running on http://localhost:${PORT} (POST /api/haut-inference, /api/openai-recommendations, /api/recommendations, /api/chat)`
   );
 });
