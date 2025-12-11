@@ -4,9 +4,11 @@ import { useEffect, useRef, useState } from "react";
 const LIQA_SOURCE_URL = import.meta.env.VITE_LIQA_SOURCE_URL as
   | string
   | undefined;
-const LIQA_LICENSE_KEY = import.meta.env.VITE_LIQA_LICENSE_KEY as
-  | string
-  | undefined;
+
+// Soportamos BOTH: VITE_LIQA_LICENSE_KEY (prod) y VITE_LIQA_CLIENT_KEY (local)
+const LIQA_LICENSE_KEY =
+  (import.meta.env.VITE_LIQA_LICENSE_KEY as string | undefined) ??
+  (import.meta.env.VITE_LIQA_CLIENT_KEY as string | undefined);
 
 interface LiqaCameraProps {
   onImageData: (imageData: string) => void;
@@ -74,12 +76,31 @@ export function LiqaCamera({ onImageData, onCancel }: LiqaCameraProps) {
       event: CustomEvent<LiqaImageCapture[]>,
     ) => {
       try {
+        const captures = event.detail || [];
+        if (!captures.length) return;
+
+        // Pedimos todos los blobs
         const blobs = await Promise.all(
-          event.detail.map((capture) => capture.blob()),
+          captures.map((capture) => capture.blob()),
         );
         if (!blobs.length) return;
 
-        const imageData = await blobToBase64(blobs[0]);
+        // 🟢 Elegimos SIEMPRE el blob de mayor tamaño (mejor calidad)
+        let bestBlob = blobs[0];
+        for (const blob of blobs) {
+          if (blob.size > bestBlob.size) {
+            bestBlob = blob;
+          }
+        }
+
+        console.log(
+          "[LIQA] captures:",
+          blobs.length,
+          "chosen blob size:",
+          bestBlob.size,
+        );
+
+        const imageData = await blobToBase64(bestBlob);
         onImageData(imageData);
       } catch (err) {
         console.error("[LIQA] error processing captures", err);
@@ -89,18 +110,20 @@ export function LiqaCamera({ onImageData, onCancel }: LiqaCameraProps) {
     liqaElement.addEventListener("captures", handleCaptures as any);
 
     return () => {
-      liqaElement.removeEventListener(
-        "captures",
-        handleCaptures as any,
-      );
+      liqaElement.removeEventListener("captures", handleCaptures as any);
     };
   }, [scriptLoaded, onImageData]);
 
+  // Si falta la key o la URL, no montamos la cámara
   if (!LIQA_LICENSE_KEY || !LIQA_SOURCE_URL) {
+    console.warn(
+      "[LIQA] Missing license key or source URL",
+      { LIQA_SOURCE_URL, LIQA_LICENSE_KEY: !!LIQA_LICENSE_KEY },
+    );
     return null;
   }
 
-  // 👇 Aquí controlamos tamaño y centrado (sin usar style string)
+  // ✅ Misma UX que en tu screenshot (tarjeta centrada)
   return (
     <div className="w-full flex flex-col items-center mt-10">
       {/* Cámara */}
@@ -108,7 +131,7 @@ export function LiqaCamera({ onImageData, onCancel }: LiqaCameraProps) {
         <hautai-liqa
           license={LIQA_LICENSE_KEY}
           style={{
-            width: "400px",
+            width: "400px", // mantenemos la “tarjeta” visual
             height: "600px",
             display: "block",
             borderRadius: "22px",
@@ -116,7 +139,7 @@ export function LiqaCamera({ onImageData, onCancel }: LiqaCameraProps) {
           }}
         ></hautai-liqa>
       </div>
-  
+
       {/* Botón Cancel */}
       {onCancel && (
         <button
@@ -140,5 +163,5 @@ export function LiqaCamera({ onImageData, onCancel }: LiqaCameraProps) {
         </button>
       )}
     </div>
-  );  
+  );
 }

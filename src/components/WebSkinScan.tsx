@@ -11,6 +11,9 @@ interface WebSkinScanProps {
   forceCameraMode?: boolean;
 }
 
+// URL base que usará siempre el QR (dominio estable de producción)
+const BASE_URL = "https://bloom-webapp-swart.vercel.app";
+
 export function WebSkinScan({
   onComplete,
   forceCameraMode = false,
@@ -90,39 +93,39 @@ export function WebSkinScan({
   }
 
   // ==========================
-// PANTALLA CÁMARA (LIQA)
-// ==========================
-if (selectedOption === "camera" && !uploadedImage) {
-  return (
-    <div className="min-h-screen bg-[#F7F7F7] flex flex-col">
-      {/* HEADER */}
-      <header className="bg-white border-b border-[#E5E5E5]">
-        <div className="max-w-5xl mx-auto px-6 md:px-8 py-6 flex items-center justify-between">
-          <div>
-            <h1 className="text-[#18212D] font-semibold text-[26px] leading-[34px]">
-              Take a Photo
-            </h1>
-            <p className="text-[#6B7280] text-[15px] mt-1">
-              Follow the on-screen guidance for the most accurate analysis.
-            </p>
+  // PANTALLA CÁMARA (LIQA)
+  // ==========================
+  if (selectedOption === "camera" && !uploadedImage) {
+    return (
+      <div className="min-h-screen bg-[#F7F7F7] flex flex-col">
+        {/* HEADER */}
+        <header className="bg-white border-b border-[#E5E5E5]">
+          <div className="max-w-5xl mx-auto px-6 md:px-8 py-6 flex items-center justify-between">
+            <div>
+              <h1 className="text-[#18212D] font-semibold text-[26px] leading-[34px]">
+                Take a Photo
+              </h1>
+              <p className="text-[#6B7280] text-[15px] mt-1">
+                Follow the on-screen guidance for the most accurate analysis.
+              </p>
+            </div>
+            <img src={bloomLogo} alt="Bloom" className="h-10" />
           </div>
-          <img src={bloomLogo} alt="Bloom" className="h-10" />
-        </div>
-      </header>
+        </header>
 
-      {/* SOLO CÁMARA, SIN TEXTOS EXTRA */}
-      <main className="flex-1 flex items-center justify-center px-4 py-10">
-        <LiqaCamera
-          onImageData={(imageData) => {
-            setUploadedImage(imageData);
-            startAnalysis(imageData, "camera");
-          }}
-          onCancel={resetSelection}
-        />
-      </main>
-    </div>
-  );
-}
+        {/* SOLO CÁMARA, SIN TEXTOS EXTRA */}
+        <main className="flex-1 flex items-center justify-center px-4 py-10">
+          <LiqaCamera
+            onImageData={(imageData) => {
+              setUploadedImage(imageData);
+              startAnalysis(imageData, "camera");
+            }}
+            onCancel={resetSelection}
+          />
+        </main>
+      </div>
+    );
+  }
 
   // ==========================
   // PANTALLA OPCIONES INICIO
@@ -286,7 +289,7 @@ if (selectedOption === "camera" && !uploadedImage) {
             </p>
 
             {(() => {
-              const qrLink = "https://bapp-swart.vercel.app/capture";
+              const qrLink = `${BASE_URL}/capture`;
               return (
                 <img
                   src={`https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(

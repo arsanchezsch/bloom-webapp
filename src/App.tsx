@@ -41,6 +41,7 @@ export default function App() {
   );
   const [authReady, setAuthReady] = useState(false);
 
+  // Detectar si estamos en la ruta /capture (flujo de paciente via QR)
   const isCaptureRoute =
     typeof window !== "undefined" && window.location.pathname === "/capture";
 
@@ -189,7 +190,8 @@ export default function App() {
     return null;
   }
 
-  if (!doctorSession) {
+  // ⚠️ CLAVE: solo pedimos login si NO estamos en /capture
+  if (!doctorSession && !isCaptureRoute) {
     return (
       <DoctorAuthScreen
         onAuthenticated={(session) => {

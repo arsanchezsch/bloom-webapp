@@ -16,8 +16,14 @@ export default defineConfig({
       'next-themes@0.4.6': 'next-themes',
       'lucide-react@0.487.0': 'lucide-react',
       'input-otp@1.4.2': 'input-otp',
-      'figma:asset/dab1c1df3e9d3b8d3a4ac9926dcfb3acb1003b4a.png': path.resolve(__dirname, './src/assets/dab1c1df3e9d3b8d3a4ac9926dcfb3acb1003b4a.png'),
-      'figma:asset/73a8a80abf64277705c5d856c147464ec33b1a04.png': path.resolve(__dirname, './src/assets/73a8a80abf64277705c5d856c147464ec33b1a04.png'),
+      'figma:asset/dab1c1df3e9d3b8d3a4ac9926dcfb3acb1003b4a.png': path.resolve(
+        __dirname,
+        './src/assets/dab1c1df3e9d3b8d3a4ac9926dcfb3acb1003b4a.png',
+      ),
+      'figma:asset/73a8a80abf64277705c5d856c147464ec33b1a04.png': path.resolve(
+        __dirname,
+        './src/assets/73a8a80abf64277705c5d856c147464ec33b1a04.png',
+      ),
       'embla-carousel-react@8.6.0': 'embla-carousel-react',
       'cmdk@1.1.1': 'cmdk',
       'class-variance-authority@0.7.1': 'class-variance-authority',
@@ -58,9 +64,12 @@ export default defineConfig({
     port: 3000,
     open: true,
     proxy: {
-      "/api": {
-        target: "http://localhost:8787",
+      // ✅ Cualquier ruta que empiece por /api se envía al backend local (8787)
+      '/api': {
+        target: 'http://localhost:8787',
         changeOrigin: true,
+        secure: false,
+        // No reescribimos el path: /api/recommendations sigue siendo /api/recommendations en el backend
       },
     },
   },
