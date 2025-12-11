@@ -1,5 +1,5 @@
 // src/hooks/useHautInference.ts
-// Frontend hook: calls local backend (/api/haut-inference)
+// Frontend hook: calls backend (/api/haut-inference)
 // and maps Haut raw results into Bloom metrics.
 
 import { useEffect, useState } from "react";
@@ -30,18 +30,63 @@ interface UseHautInferenceState {
   isLoading: boolean;
 }
 
-// Llama a nuestro backend en http://localhost:8787
+// === Helper: comprimir imagen base64 para evitar 413 en Vercel ===
+async function compressBase64Image(
+  dataUrl: string,
+  maxWidth = 1200,
+  quality = 0.85
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+
+      if (!ctx) {
+        reject(new Error("Canvas context error"));
+        return;
+      }
+
+      const scale = Math.min(1, maxWidth / img.width);
+      const w = img.width * scale;
+      const h = img.height * scale;
+
+      canvas.width = w;
+      canvas.height = h;
+      ctx.drawImage(img, 0, 0, w, h);
+
+      const compressed = canvas.toDataURL("image/jpeg", quality);
+      resolve(compressed);
+    };
+
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
+
+// Llama a nuestro backend serverless (/api/haut-inference)
 async function callBackendInference(
   imageData: string,
   subjectName: string
 ): Promise<{ ids: HautScanIdentifiers; rawResults: any[] }> {
+  console.log("[Bloom Front] Original image size:", imageData.length);
+
+  // 🔥 Comprimir imagen antes de enviarla a Vercel
+  const compressedImage = await compressBase64Image(imageData, 1200, 0.85);
+
+  console.log(
+    "[Bloom Front] Compressed image size:",
+    compressedImage.length
+  );
+
   const response = await fetch("/api/haut-inference", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      base64Image: imageData,
+      base64Image: compressedImage,
       subjectName,
     }),
   });
@@ -91,7 +136,7 @@ async function callBackendInference(
 
 /**
  * Hook principal que lanza la inferencia en Haut.AI
- * a partir de una imagen en base64 usando el backend local.
+ * a partir de una imagen en base64 usando el backend.
  */
 export function useHautInference(
   imageData: string | null,
@@ -152,10 +197,9 @@ export function useHautInference(
               id: linesMetric.id, // "lines_wrinkles"
               label: "Lines & Wrinkles",
               value: linesMetric.score,
-              // IMPORTANTE: nombre corto para que encaje con TECH_NAME_TO_SKIN_METRIC_ID
               techName: "lines",
               familyName: "Lines",
-              raw: linesMetric, // guardamos todo por si lo necesitamos luego
+              raw: linesMetric,
             });
           }
 
@@ -164,10 +208,9 @@ export function useHautInference(
 
           if (poresMetric) {
             metrics.push({
-              id: "pores", // id interno que usaremos en Bloom
+              id: "pores",
               label: "Pores",
               value: poresMetric.score,
-              // IMPORTANTE: nombre corto para que encaje con TECH_NAME_TO_SKIN_METRIC_ID
               techName: "pores",
               familyName: "Pores",
               raw: poresMetric,
@@ -180,10 +223,9 @@ export function useHautInference(
 
           if (pigmentationMetric) {
             metrics.push({
-              id: "pigmentation", // id interno en Bloom
+              id: "pigmentation",
               label: "Pigmentation",
               value: pigmentationMetric.score,
-              // IMPORTANTE: coincide con TECH_NAME_TO_SKIN_METRIC_ID["pigmentation"]
               techName: "pigmentation",
               familyName: "Pigmentation",
               raw: pigmentationMetric,
