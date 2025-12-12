@@ -132,17 +132,6 @@ export function WebDashboard({
 }: WebDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>(initialTab);
 
-// Chat state
-const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
-const [inputValue, setInputValue] = useState("");
-const [isSending, setIsSending] = useState(false);
-const [chatError, setChatError] = useState<string | null>(null);
-
-const fileInputRef = useRef<HTMLInputElement>(null);
-const profilePhotoInputRef = useRef<HTMLInputElement>(null);
-const messagesEndRef = useRef<HTMLDivElement | null>(null);
-
-
   const [showDoctorModal, setShowDoctorModal] = useState(false);
 
   // 🔹 Doctor info (intentamos leer de auth/session)
@@ -150,14 +139,7 @@ const messagesEndRef = useRef<HTMLDivElement | null>(null);
     fullName: "Doctor",
     email: "",
   });
-
-  useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [messages, isSending]);
   
-
   useEffect(() => {
     try {
       const raw =
@@ -375,7 +357,23 @@ const [routineUpdatedAt, setRoutineUpdatedAt] = useState<string | null>(null);
     setIsEditingCurrentProducts(false);
   };
 
-  // Preguntas sugeridas dinámicas en función del último scan y el perfil
+    // Chat state
+    const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
+    const [chatInput, setChatInput] = useState("");
+    const [isSending, setIsSending] = useState(false);
+    const [chatError, setChatError] = useState<string | null>(null);
+  
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const profilePhotoInputRef = useRef<HTMLInputElement>(null);
+    const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  
+    useEffect(() => {
+      if (messagesEndRef.current) {
+        messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+      }
+    }, [messages, isSending]);  
+
+// Preguntas sugeridas dinámicas en función del último scan y el perfil
 const buildSuggestedQuestions = (): string[] => {
   const concernsFromRoutine = routine?.mainConcerns ?? [];
   const concernsFromProfile = mainConcerns || [];
@@ -392,7 +390,6 @@ const buildSuggestedQuestions = (): string[] => {
       .replace(/\b\w/g, (ch) => ch.toUpperCase());
 
   if (!unique.length) {
-    // fallback a tus preguntas genéricas
     return [
       "What products should I use for my acne?",
       "How can I improve my skin hydration?",
@@ -441,69 +438,70 @@ const buildSkinContext = () => {
   };
 };
 
-const handleSendMessage = async (messageText?: string) => {
-  const textToSend = messageText ?? inputValue;
-  if (!textToSend.trim() || isSending) return;
+// Enviar mensaje al backend (texto libre o pregunta sugerida)
+const handleSendMessage = async (forcedContent?: string) => {
+  const content = (forcedContent ?? chatInput).trim();
+  if (!content || isSending) return;
+
+  setChatError(null);
 
   const userMessage: ChatMessage = {
-    id: Date.now().toString(),
+    id: crypto.randomUUID(),
     role: "user",
-    content: textToSend,
+    content,
     timestamp: new Date(),
   };
 
-  // pintamos mensaje usuario
-  setMessages((prev) => [...prev, userMessage]);
-  setInputValue("");
-  setChatError(null);
+  const historyAfterUser: ChatMessage[] = [...messages, userMessage];
+  setMessages(historyAfterUser);
+
+  // Si viene del input, limpiamos el campo
+  if (!forcedContent) {
+    setChatInput("");
+  }
+
   setIsSending(true);
 
   try {
-    // histórico para el backend (solo texto + nota si había imagen)
-    const backendMessages = [...messages, userMessage].map((m) => ({
-      role: m.role,
-      content:
-        m.content +
-        (m.image ? " (Note: the user also uploaded a new skin photo.)" : ""),
-    }));
-
-    const payload = {
-      messages: backendMessages,
-      skinContext: buildSkinContext(),
-    };
-
-    const response = await fetch(`${BLOOM_SERVER_URL}/api/chat`, {
+    const res = await fetch(`${BLOOM_SERVER_URL}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        messages: historyAfterUser.map((m) => ({
+          role: m.role,
+          content: m.content,
+        })),
+        skinContext: buildSkinContext(),
+      }),
     });
 
-    if (!response.ok) {
-      throw new Error("Chat request failed");
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("[Bloom Web] Chat backend error:", text);
+      throw new Error("Error calling Bloom chat backend");
     }
 
-    const data = await response.json();
+    const data = await res.json();
 
-    const aiMessage: ChatMessage = {
-      id: (Date.now() + 1).toString(),
+    const assistantMessage: ChatMessage = {
+      id: crypto.randomUUID(),
       role: "assistant",
       content:
-        data.reply ||
-        "I'm having trouble accessing your skin data right now, but I can still give you general cosmetic advice.",
+        data.reply ??
+        "I'm having trouble accessing your full skin data right now, but I can still share general skincare guidance.",
       timestamp: new Date(),
     };
 
-    setMessages((prev) => [...prev, aiMessage]);
+    setMessages((prev) => [...prev, assistantMessage]);
   } catch (error) {
-    console.error("[Bloom Web] Chat error", error);
+    console.error("[Bloom Web] Chat error:", error);
     setChatError(
-      "There was a problem connecting to Bloom AI. Please try again in a moment."
+      "We couldn’t connect to the chat right now. Please try again in a moment."
     );
   } finally {
     setIsSending(false);
   }
 };
-
 
 const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
   const file = e.target.files?.[0];
@@ -525,7 +523,7 @@ const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       setMessages((prev) => [...prev, imageMessage]);
 
       // disparamos una pregunta automática para que el modelo responda
-      handleSendMessage(
+      void handleSendMessage(
         "I just uploaded a new skin photo. Can you review my main concerns based on my latest analysis?"
       );
     };
@@ -790,18 +788,17 @@ const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     {/* Input Area */}
     <div className="bg-white border-t border-[#E5E5E5] p-6">
       <div className="max-w-4xl mx-auto flex gap-3">
-        <input
-          type="text"
-          value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
-          placeholder="Ask anything about your skin..."
-          className="flex-1 h-14 bg-[#F5F5F5] rounded-xl px-6 text-[#18212D] 
-            placeholder:text-[#6B7280] border border-[#E5E5E5] 
-            focus:outline-none focus:border-[#FF6B4A] transition-colors 
-            font-['Manrope',sans-serif]"
-        />
-
+      <input
+  type="text"
+  value={chatInput}
+  onChange={(e) => setChatInput(e.target.value)}
+  onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
+  placeholder="Ask anything about your skin..."
+  className="flex-1 h-14 bg-[#F5F5F5] rounded-xl px-6 text-[#18212D] 
+    placeholder:text-[#6B7280] border border-[#E5E5E5] 
+    focus:outline-none focus:border-[#FF6B4A] transition-colors 
+    font-['Manrope',sans-serif]"
+/>
         <input
           ref={fileInputRef}
           type="file"
@@ -819,15 +816,15 @@ const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
   <Plus className="w-5 h-5 text-[#FF6B4A]" />
 </Button>
 
-        <Button
-          onClick={() => handleSendMessage()}
-          disabled={!inputValue.trim() || isSending}
-          className="h-14 px-8 bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] 
-            hover:from-[#E74C3C] hover:to-[#FF8C42] text-white rounded-xl shadow-lg 
-            border-0 disabled:opacity-50 font-['Manrope',sans-serif]"
-        >
-          <Send className="w-5 h-5" />
-        </Button>
+<Button
+  onClick={() => handleSendMessage()}
+  disabled={!chatInput.trim() || isSending}
+  className="h-14 px-8 bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] 
+    hover:from-[#E74C3C] hover:to-[#FF8C42] text.white rounded-xl shadow-lg 
+    border-0 disabled:opacity-50 font-['Manrope',sans-serif]"
+>
+  <Send className="w-5 h-5" />
+</Button>
       </div>
 
       {chatError && (

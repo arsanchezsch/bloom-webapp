@@ -35,6 +35,9 @@ interface WebResultsScreenProps {
   onViewDashboard?: () => void;
 }
 
+const BLOOM_SERVER_URL =
+  import.meta.env.VITE_BLOOM_SERVER_URL || "http://localhost:8787";
+
 const SKIN_TYPE_ID = "skin_type";
 
 // IDs de las métricas que usamos para el Overall Health (promedio)
@@ -219,17 +222,14 @@ export function WebResultsScreen({
           existing.name.toLowerCase().includes("acne") ||
           tech === "acne";
 
-        // Empezamos creando la métrica actualizada con score, status y raw
         let updated: SkinMetric = {
           ...existing,
           score: m.value ?? existing.score,
           status: (m.tag as any) || existing.status,
-          // Guardamos SIEMPRE el raw de Haut por si luego lo queremos usar
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           raw: (m as any).raw ?? (existing as any).raw,
         };
 
-        // 🔹 Si es la métrica de Acne, extraemos biomarcadores reales
         if (isAcneMetric) {
           const acneRaw: any = (m as any).raw || {};
 
@@ -274,7 +274,6 @@ export function WebResultsScreen({
       return Array.from(byId.values());
     });
 
-    // Mantengo esto por si en el futuro quieres usar maskUrl desde hautResult.metrics
     setMetricMasks((prevMasks) => {
       const next = { ...prevMasks };
 
@@ -327,58 +326,48 @@ export function WebResultsScreen({
     }));
   }, [displayMetrics]);
 
-  // Helper para mostrar bonito los concerns ("lines_wrinkles" → "Lines Wrinkles")
-  const formatConcernLabel = (id: string): string => {
-    return id
-      .replace(/_/g, " ")
-      .replace(/\b\w/g, (c) => c.toUpperCase());
-  };
+  // ============================
+  // 4A) Guardar SIEMPRE el último análisis (overwrite)
+  // ============================
+  useEffect(() => {
+    if (!hautResult) return;
+    if (!displayMetrics || displayMetrics.length === 0) return;
+    if (!dynamicOverallHealth) return;
 
-// ============================
-// 4A) Guardar SIEMPRE el último análisis (overwrite)
-//      -> para que el Progress lea los datos buenos
-// ============================
-useEffect(() => {
-  if (!hautResult) return;
-  if (!displayMetrics || displayMetrics.length === 0) return;
-  if (!dynamicOverallHealth) return;
+    try {
+      localStorage.setItem(
+        "bloom_last_scan_metrics",
+        JSON.stringify(displayMetrics)
+      );
 
-  try {
-    // Usamos las mismas keys que el dashboard
-    localStorage.setItem(
-      "bloom_last_scan_metrics",
-      JSON.stringify(displayMetrics)
-    );
-
-    localStorage.setItem(
-      "bloom_last_overall_health",
-      JSON.stringify(dynamicOverallHealth)
-    );
-  } catch (err) {
-    console.error("[Bloom] Error saving last analysis to localStorage", err);
-  }
-}, [hautResult, displayMetrics, dynamicOverallHealth]);
-
-// ============================
-// 4B) Guardar UNA VEZ el scan en el histórico de fotos
-//      -> para Photo History
-// ============================
-useEffect(() => {
-  if (!hautResult) return;
-  if (!capturedImage) return;
-  if (hasPersistedRef.current) return; // solo una vez
-
-  try {
-    fakeBackend.saveScan(capturedImage, "camera");
-    hasPersistedRef.current = true;
-    console.log("[Bloom] Scan saved in fakeBackend history");
-  } catch (err) {
-    console.error("[Bloom] Error saving scan to fakeBackend", err);
-  }
-}, [hautResult, capturedImage]);
+      localStorage.setItem(
+        "bloom_last_overall_health",
+        JSON.stringify(dynamicOverallHealth)
+      );
+    } catch (err) {
+      console.error("[Bloom] Error saving last analysis to localStorage", err);
+    }
+  }, [hautResult, displayMetrics, dynamicOverallHealth]);
 
   // ============================
-  // 4) Generar rutina con OpenAI (backend /api/recommendations)
+  // 4B) Guardar UNA VEZ el scan en el histórico de fotos
+  // ============================
+  useEffect(() => {
+    if (!hautResult) return;
+    if (!capturedImage) return;
+    if (hasPersistedRef.current) return;
+
+    try {
+      fakeBackend.saveScan(capturedImage, "camera");
+      hasPersistedRef.current = true;
+      console.log("[Bloom] Scan saved in fakeBackend history");
+    } catch (err) {
+      console.error("[Bloom] Error saving scan to fakeBackend", err);
+    }
+  }, [hautResult, capturedImage]);
+
+  // ============================
+  // 5) Generar rutina con OpenAI (backend /api/recommendations)
   // ============================
   useEffect(() => {
     if (!hautResult || !hautResult.metrics || hautResult.metrics.length === 0) {
@@ -392,44 +381,40 @@ useEffect(() => {
         setIsLoadingRoutine(true);
         setRoutineError(null);
 
-        const skinMetricsPayload = hautResult.metrics.map((m: any) => ({
-          techName: m.techName,
-          value: m.value,
-          tag: m.tag,
-        }));
-
         console.log("[Bloom Front] Calling /api/recommendations…");
 
-        const res = await fetch("/api/recommendations", {
+        const res = await fetch(`${BLOOM_SERVER_URL}/api/recommendations`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           signal: controller.signal,
           body: JSON.stringify({
-            skinMetrics: skinMetricsPayload,
+            skinMetrics: displayMetrics,
             overallHealth: dynamicOverallHealth,
           }),
         });
 
         if (!res.ok) {
-          console.error("[Bloom Front] /api/recommendations status", res.status);
-          throw new Error("Error al generar la rutina");
+          const text = await res.text();
+          console.error("[Bloom Front] Error fetching routine", text);
+          throw new Error(`Error fetching routine (${res.status})`);
         }
 
         const data = (await res.json()) as BloomRoutineResponse;
         console.log("[Bloom Front] Routine received:", data);
 
         setRoutine(data);
-        // 🔹 Guardamos la rutina del último scan para que el dashboard la use
-try {
-  localStorage.setItem("bloom_last_routine_v1", JSON.stringify(data));
-  localStorage.setItem(
-    "bloom_last_routine_created_at_v1",
-    new Date().toISOString()
-  );
-  console.log("[Bloom] Last routine persisted to localStorage");
-} catch (err) {
-  console.error("[Bloom] Error saving last routine", err);
-}
+
+        // Guardamos la rutina del último scan para que el dashboard la use
+        try {
+          localStorage.setItem("bloom_last_routine_v1", JSON.stringify(data));
+          localStorage.setItem(
+            "bloom_last_routine_created_at_v1",
+            new Date().toISOString()
+          );
+          console.log("[Bloom] Last routine persisted to localStorage");
+        } catch (err) {
+          console.error("[Bloom] Error saving last routine", err);
+        }
       } catch (error: any) {
         if (error.name === "AbortError") return;
         console.error("[Bloom Front] Error fetching routine", error);
@@ -444,7 +429,7 @@ try {
     fetchRoutine();
 
     return () => controller.abort();
-  }, [hautResult, dynamicOverallHealth]);
+  }, [hautResult, displayMetrics, dynamicOverallHealth]);
 
   const handleDownloadReport = async () => {
     if (!reportRef.current || isDownloading) return;
@@ -560,31 +545,34 @@ try {
               <img src={bloomLogo} alt="Bloom" className="h-12" />
             </div>
 
-            {/* Action Buttons */}
-            <div className="flex justify-center gap-3">
+                        {/* Action Buttons */}
+                        <div className="flex flex-wrap justify-center gap-3">
+              {/* Go to Dashboard – CTA principal */}
               <Button
                 type="button"
                 onClick={() => onViewDashboard?.()}
-                className="h-12 px-6 bg-white text-[#FF6B4A] border border-[#FF6B4A] hover:bg-[#FFF5F3] hover:text-[#FF6B4A] rounded-full font-['Manrope',sans-serif] transition-all duration-300"
+                className="h-12 px-8 bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] text-white rounded-full border-0 hover:opacity-90 flex items-center justify-center font-['Manrope',sans-serif] transition-all duration-300"
               >
                 <LayoutDashboard className="w-4 h-4 mr-2" />
                 Go to Dashboard
               </Button>
 
+              {/* Share */}
               <Button
                 type="button"
                 onClick={() => setIsShareOpen(true)}
-                className="h-12 px-6 bg-white text-[#FF6B4A] border border-[#FF6B4A] hover:bg-[#FFF5F3] hover:text-[#FF6B4A] rounded-full font-['Manrope',sans-serif] transition-all duration-300"
+                className="h-12 px-6 bg-white text-[#FF6B4A] border border-[#FF6B4A] hover:bg-[#FFF5F3] hover:text-[#FF6B4A] rounded-full flex items-center justify-center font-['Manrope',sans-serif] transition-all duration-300"
               >
                 <Share2 className="w-4 h-4 mr-2" />
                 Share
               </Button>
 
+              {/* Download Report */}
               <Button
                 type="button"
                 onClick={handleDownloadReport}
                 disabled={isDownloading}
-                className="h-12 px-6 bg-white text-[#FF6B4A] border border-[#FF6B4A] hover:bg-[#FFF5F3] hover:text-[#FF6B4A] rounded-full font-['Manrope',sans-serif] transition-all duration-300 disabled:opacity-60 disabled:cursor-not-allowed"
+                className="h-12 px-6 bg-white text-[#FF6B4A] border border-[#FF6B4A] hover:bg-[#FFF5F3] hover:text-[#FF6B4A] rounded-full flex items-center justify-center font-['Manrope',sans-serif] transition-all duration-300 disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <Download className="w-4 h-4 mr-2" />
                 {isDownloading ? "Generating PDF..." : "Download Report"}
@@ -749,7 +737,6 @@ try {
               </div>
             )}
 
-            {/* Fallback suave si por algún motivo no hay rutina ni error */}
             {!routine && !isLoadingRoutine && !routineError && (
               <p className="text-sm text-[#9CA3AF]">
                 We&apos;ll generate a personalized routine right after your next

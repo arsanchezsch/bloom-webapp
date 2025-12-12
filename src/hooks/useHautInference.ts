@@ -1,5 +1,5 @@
 // src/hooks/useHautInference.ts
-// Frontend hook: calls backend (/api/haut-inference)
+// Frontend hook: calls backend (BLOOM_SERVER_URL + /api/haut-inference)
 // and maps Haut raw results into Bloom metrics.
 
 import { useEffect, useState } from "react";
@@ -11,6 +11,10 @@ import {
   mapFaceSkin3PoresToBloom,
   mapFaceSkin3PigmentationToBloom, // 👈 NUEVO IMPORT
 } from "../lib/haut";
+
+// 👇 URL del backend (Render en prod, localhost en dev)
+const BLOOM_SERVER_URL =
+  import.meta.env.VITE_BLOOM_SERVER_URL || "http://localhost:8787";
 
 export type InferenceStatus =
   | "idle"
@@ -30,7 +34,7 @@ interface UseHautInferenceState {
   isLoading: boolean;
 }
 
-// === Helper: comprimir imagen base64 para evitar 413 en Vercel ===
+// === Helper: comprimir imagen base64 para evitar 413 en Vercel/Render ===
 async function compressBase64Image(
   dataUrl: string,
   maxWidth = 1200,
@@ -72,7 +76,7 @@ async function callBackendInference(
 ): Promise<{ ids: HautScanIdentifiers; rawResults: any[] }> {
   console.log("[Bloom Front] Original image size:", imageData.length);
 
-  // 🔥 Comprimir imagen antes de enviarla a Vercel
+  // 🔥 Comprimir imagen antes de enviarla al backend
   const compressedImage = await compressBase64Image(imageData, 1200, 0.85);
 
   console.log(
@@ -80,7 +84,8 @@ async function callBackendInference(
     compressedImage.length
   );
 
-  const response = await fetch("/api/haut-inference", {
+  // 👇 AQUÍ estaba el error de sintaxis (faltaba la ` y el paréntesis)
+  const response = await fetch(`${BLOOM_SERVER_URL}/api/haut-inference`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -183,7 +188,7 @@ export function useHautInference(
         // 2) Mapeamos resultados de Haut a métricas de Bloom
         let metrics: any[] = [];
         try {
-          // Mapeo genérico (por si queremos seguir usándolo después)
+          // Mapeo genérico
           metrics = await mapRawResultsToMetrics(rawResults);
 
           // 3) Extra: conectar Face Skin Metrics 3.0 -> Bloom
