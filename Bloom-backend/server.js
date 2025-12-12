@@ -1,51 +1,51 @@
 // server.js
-// Bloom backend proxy to call Haut.AI safely from the webapp.
+// Bloom backend proxy to call Haut.AI + OpenAI safely from the webapp.
 
 const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const OpenAI = require("openai");
 
-// Load env vars from .env.local (same ones used by Vite)
-dotenv.config({ path: ".env.local" });
+// ============================================
+// ENV SETUP
+// ============================================
 
-console.log(
-  "[DEBUG] ENV LOADED → ",
-  Object.keys(process.env).filter(
-    (k) => k.includes("OPENAI") || k.includes("LIQA")
-  )
-);
-console.log("[DEBUG] OPENAI KEY RAW →", process.env.OPENAI_API_KEY);
-console.log(
-  "[DEBUG] OPENAI_API_KEY está cargada?",
-  !!process.env.OPENAI_API_KEY
-);
-console.log(
-  "[DEBUG] Primeros caracteres de la clave:",
-  process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.slice(0, 8)
-);
+// En local cargamos .env.local (no sobreescribe las de Render)
+dotenv.config({ path: ".env.local" });
 
 const app = express();
 const PORT = process.env.PORT || 8787;
 
-const HAUT_BASE_V1 = "https://saas.haut.ai/api/v1";
-const HAUT_BASE_V3 = "https://saas.haut.ai/api/v3";
-
-const API_KEY = process.env.HAUT_API_KEY;
-const COMPANY_ID = process.env.HAUT_COMPANY_ID;
-const DATASET_ID = process.env.HAUT_DATASET_ID;
+// Haut.AI config: aceptamos tanto HAUT_* como VITE_HAUT_* (para no romper nada)
+const API_KEY =
+  process.env.HAUT_API_KEY || process.env.VITE_HAUT_API_KEY || "";
+const COMPANY_ID =
+  process.env.HAUT_COMPANY_ID || process.env.VITE_HAUT_COMPANY_ID || "";
+const DATASET_ID =
+  process.env.HAUT_DATASET_ID || process.env.VITE_HAUT_DATASET_ID || "";
 
 // OpenAI client (Bloom recommendations / chat)
-// 👉 Solo apiKey, SIN "project", porque estás usando un secret key normal (sk-...)
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY?.trim(),
 });
 
+console.log("========== BLOOM BACKEND START ==========");
+console.log("[ENV] NODE_ENV:", process.env.NODE_ENV);
+console.log("[ENV] PORT:", PORT);
+console.log("[ENV] Has OPENAI_API_KEY?", !!process.env.OPENAI_API_KEY);
+console.log("[ENV] Has HAUT API KEY?", !!API_KEY);
+console.log("[ENV] COMPANY_ID:", COMPANY_ID || "(none)");
+console.log("[ENV] DATASET_ID:", DATASET_ID || "(none)");
+console.log("=========================================");
+
 if (!API_KEY || !COMPANY_ID || !DATASET_ID) {
   console.warn(
-    "[Bloom Haut] Missing env vars. Check VITE_HAUT_API_KEY, VITE_HAUT_COMPANY_ID and VITE_HAUT_DATASET_ID in .env.local"
+    "[Bloom Haut] Missing env vars. Set HAUT_API_KEY / HAUT_COMPANY_ID / HAUT_DATASET_ID (or the VITE_* equivalents)."
   );
 }
+
+const HAUT_BASE_V1 = "https://saas.haut.ai/api/v1";
+const HAUT_BASE_V3 = "https://saas.haut.ai/api/v3";
 
 app.use(cors());
 app.use(
@@ -54,7 +54,9 @@ app.use(
   })
 );
 
+// ============================================
 // Helper to call Haut APIs with proper headers
+// ============================================
 async function hautRequest(url, options = {}) {
   const res = await fetch(url, {
     ...options,
@@ -535,7 +537,6 @@ Respond to the user's LAST message using the real scan data.
 Keep the tone warm, supportive and professional.
 `.trim();
 
-
     const response = await openai.responses.create({
       model: "gpt-4.1-mini",
       input: inputText,
@@ -555,7 +556,6 @@ Keep the tone warm, supportive and professional.
       details: error.details,
     });
 
-    // ⚠️ IMPORTANTE: nunca devolvemos 500 al frontend; damos fallback
     const fallbackReply =
       "Ahora mismo tengo un problema para acceder a todos tus datos de piel, pero puedo darte un consejo general: prioriza una limpieza suave, hidratación constante y protector solar diario. Si notas irritación, simplifica la rutina.";
 
@@ -569,10 +569,28 @@ Keep the tone warm, supportive and professional.
 });
 
 // ============================================
+// HEALTHCHECK (para Render y para probar rápido)
+// ============================================
+app.get("/", (req, res) => {
+  res.send("Bloom backend is running ✅");
+});
+
+app.get("/api/health", (req, res) => {
+  res.json({
+    ok: true,
+    env: process.env.NODE_ENV || "unknown",
+    hasOpenAI: !!process.env.OPENAI_API_KEY,
+    hasHautKey: !!API_KEY,
+    companyId: COMPANY_ID || null,
+    datasetId: DATASET_ID || null,
+  });
+});
+
+// ============================================
 // START SERVER
 // ============================================
 app.listen(PORT, () => {
   console.log(
-    `Bloom backend running on http://localhost:${PORT} (POST /api/haut-inference, /api/openai-recommendations, /api/recommendations, /api/chat)`
+    `Bloom backend running on port ${PORT} (POST /api/haut-inference, /api/openai-recommendations, /api/recommendations, /api/chat)`
   );
 });

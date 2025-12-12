@@ -35,8 +35,7 @@ interface WebResultsScreenProps {
   onViewDashboard?: () => void;
 }
 
-const BLOOM_SERVER_URL =
-  import.meta.env.VITE_BLOOM_SERVER_URL || "http://localhost:8787";
+const BLOOM_SERVER_URL = import.meta.env.VITE_BLOOM_SERVER_URL;
 
 const SKIN_TYPE_ID = "skin_type";
 

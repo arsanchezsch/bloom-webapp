@@ -13,8 +13,7 @@ import {
 } from "../lib/haut";
 
 // 👇 URL del backend (Render en prod, localhost en dev)
-const BLOOM_SERVER_URL =
-  import.meta.env.VITE_BLOOM_SERVER_URL || "http://localhost:8787";
+const BLOOM_SERVER_URL = import.meta.env.VITE_BLOOM_SERVER_URL;
 
 export type InferenceStatus =
   | "idle"
