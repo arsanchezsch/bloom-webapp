@@ -13,7 +13,6 @@ import {
   Edit,
   Check,
   X,
-  Camera,
   Search,
 } from "lucide-react";
 import bloomLogo from "figma:asset/73a8a80abf64277705c5d856c147464ec33b1a04.png";
@@ -78,8 +77,7 @@ export function DoctorHomeScreen({
     if (patientsData) {
       const loadedPatients = JSON.parse(patientsData) as Patient[];
       loadedPatients.sort(
-        (a, b) =>
-          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+        (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
       );
       setPatients(loadedPatients);
     }
@@ -89,23 +87,32 @@ export function DoctorHomeScreen({
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setTempPhoto(reader.result as string);
-      };
+      reader.onloadend = () => setTempPhoto(reader.result as string);
       reader.readAsDataURL(file);
     }
   };
 
   const handleSaveProfile = () => {
+    // ✅ Cierra primero (UI instantánea)
+    setIsEditModalOpen(false);
+
     const updatedInfo = {
       ...doctorInfo,
       fullName: tempName || doctorInfo.fullName,
       email: tempEmail || doctorInfo.email,
       profilePhoto: tempPhoto,
     };
+
     setDoctorInfo(updatedInfo);
     localStorage.setItem("bloom_doctor_session_v2", JSON.stringify(updatedInfo));
-    setIsEditModalOpen(false);
+
+    // ✅ Mantener temps sincronizados
+    setTempName(updatedInfo.fullName);
+    setTempEmail(updatedInfo.email);
+    setTempPhoto(updatedInfo.profilePhoto || "");
+
+    // ✅ Safety: por si algo lo reabre en el mismo ciclo
+    setTimeout(() => setIsEditModalOpen(false), 0);
   };
 
   const handleCancelEdit = () => {
@@ -131,6 +138,7 @@ export function DoctorHomeScreen({
         <div className="max-w-7xl mx-auto px-8 py-6 flex items-center justify-between">
           <img src={bloomLogo} alt="Bloom" className="h-12" />
           <Button
+            type="button"
             onClick={handleLogout}
             className="h-12 px-6 bg-white hover:bg-red-50 text-red-600 border border-red-200 hover:border-red-300 rounded-xl transition-all"
           >
@@ -142,7 +150,6 @@ export function DoctorHomeScreen({
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-8 py-12">
-        {/* Dos columnas: izquierda doctor (ancho fijo), derecha pacientes (flex) */}
         <div className="flex flex-row gap-8 items-start">
           {/* Left Sidebar - Doctor Profile */}
           <div className="w-[320px] flex-shrink-0">
@@ -161,11 +168,11 @@ export function DoctorHomeScreen({
                   </div>
                 )}
                 <h3 className="text-[#2D2D2D] mb-1 truncate">
-  {doctorInfo.fullName || "Doctor"}
-</h3>
-<p className="text-xs text-[#7A7A7A]">
-  {doctorInfo.email || "Doctor Account"}
-</p>
+                  {doctorInfo.fullName || "Doctor"}
+                </h3>
+                <p className="text-xs text-[#7A7A7A]">
+                  {doctorInfo.email || "Doctor Account"}
+                </p>
               </div>
 
               {/* Doctor Details */}
@@ -181,13 +188,10 @@ export function DoctorHomeScreen({
                   <Calendar className="w-4 h-4 flex-shrink-0" />
                   <span>
                     {doctorInfo.timestamp
-                      ? new Date(doctorInfo.timestamp).toLocaleDateString(
-                          "en-US",
-                          {
-                            month: "short",
-                            year: "numeric",
-                          }
-                        )
+                      ? new Date(doctorInfo.timestamp).toLocaleDateString("en-US", {
+                          month: "short",
+                          year: "numeric",
+                        })
                       : "Today"}
                   </span>
                 </div>
@@ -195,6 +199,7 @@ export function DoctorHomeScreen({
 
               {/* Edit Button */}
               <Button
+                type="button"
                 onClick={() => setIsEditModalOpen(true)}
                 className="w-full h-10 bg-white hover:bg-[#F5F5F5] text-[#6B7280] border border-[#E5E5E5] rounded-xl transition-colors"
               >
@@ -213,10 +218,13 @@ export function DoctorHomeScreen({
                   <h2 className="text-[#2D2D2D] text-2xl mb-1">Your Patients</h2>
                   <p className="text-[#7A7A7A] text-sm">
                     {patients.length}{" "}
-                    {patients.length === 1 ? "patient registered" : "patients registered"}
+                    {patients.length === 1
+                      ? "patient registered"
+                      : "patients registered"}
                   </p>
                 </div>
                 <Button
+                  type="button"
                   onClick={onNewConsultation}
                   className="h-12 px-6 bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] hover:opacity-90 text-white rounded-xl transition-opacity shadow-lg"
                 >
@@ -296,7 +304,7 @@ export function DoctorHomeScreen({
 
             {/* Photo Upload */}
             <div className="flex flex-col items-center mb-6">
-              <div className="relative mb-3">
+              <div className="mb-3">
                 {tempPhoto ? (
                   <img
                     src={tempPhoto}
@@ -308,23 +316,24 @@ export function DoctorHomeScreen({
                     <User className="w-12 h-12 text-white" />
                   </div>
                 )}
-                <button
-  onClick={() => photoInputRef.current?.click()}
-  className="absolute bottom-1 right-1 w-9 h-9 bg-white border border-[#FFA94D] rounded-full flex items-center justify-center hover:bg-[#FFF2E8] transition-all shadow-md"
->
-  <Camera className="w-4 h-4 text-[#FF6B4A]" />
-</button>
-                <input
-                  ref={photoInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handlePhotoChange}
-                  className="hidden"
-                />
               </div>
-              <p className="text-xs text-[#7A7A7A]">
-                Click camera to change photo
-              </p>
+
+              {/* Solo texto */}
+              <button
+                type="button"
+                onClick={() => photoInputRef.current?.click()}
+                className="text-sm text-[#FF6B4A] hover:underline font-medium"
+              >
+                Edit Photo
+              </button>
+
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handlePhotoChange}
+                className="hidden"
+              />
             </div>
 
             {/* Form Fields */}
@@ -377,6 +386,7 @@ export function DoctorHomeScreen({
             {/* Action Buttons */}
             <div className="flex gap-3">
               <Button
+                type="button"
                 onClick={handleSaveProfile}
                 className="flex-1 h-12 bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] hover:opacity-90 text-white rounded-xl transition-opacity"
               >
@@ -384,6 +394,7 @@ export function DoctorHomeScreen({
                 Save Changes
               </Button>
               <Button
+                type="button"
                 onClick={handleCancelEdit}
                 className="flex-1 h-12 bg-white hover:bg-[#F5F5F5] text-[#6B7280] border border-[#E5E5E5] rounded-xl transition-colors"
               >

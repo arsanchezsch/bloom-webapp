@@ -3,11 +3,13 @@
 // Main screen showing skin analysis results
 // ============================================
 
-import { useState, useRef, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "./ui/button";
 import { Calendar, LayoutDashboard, Share2, Download } from "lucide-react";
+
 import bloomLogo from "../assets/73a8a80abf64277705c5d856c147464ec33b1a04.png";
 import exampleImage from "../assets/dab1c1df3e9d3b8d3a4ac9926dcfb3acb1003b4a.png";
+
 import { AnalyzingScreen } from "./AnalyzingScreen";
 import { exportElementToPdf } from "../utils/exportToPdf";
 import { fakeBackend } from "../services/fakeBackend";
@@ -16,6 +18,7 @@ import {
   skinMetrics as staticSkinMetrics,
   overallHealth as mockOverallHealth,
 } from "../constants/skinAnalysis";
+
 import { formatDate } from "../utils/helpers";
 import type { SkinMetric } from "../types";
 
@@ -36,8 +39,6 @@ interface WebResultsScreenProps {
 }
 
 const BLOOM_SERVER_URL = import.meta.env.VITE_BLOOM_SERVER_URL;
-
-const SKIN_TYPE_ID = "skin_type";
 
 // IDs de las métricas que usamos para el Overall Health (promedio)
 const OVERALL_METRIC_IDS = [
@@ -103,13 +104,13 @@ export function WebResultsScreen({
   const [isDownloading, setIsDownloading] = useState(false);
   const userEmail = "user@example.com";
 
-  const [activeMetricId, setActiveMetricId] = useState<string | null>(null);
   const [displayMetrics, setDisplayMetrics] =
     useState<SkinMetric[]>(staticSkinMetrics);
 
   const [dynamicOverallHealth, setDynamicOverallHealth] =
     useState(mockOverallHealth);
 
+  // Guardamos el link “maskUrl” por metricId (viene de lib/haut.ts como aligned_face)
   const [metricMasks, setMetricMasks] = useState<
     Record<string, string | undefined>
   >({});
@@ -130,7 +131,7 @@ export function WebResultsScreen({
   } = useHautInference(capturedImage);
 
   // ============================
-  // Imagen base + máscaras Haut
+  // Imagen base + máscaras Haut (legacy fallback)
   // ============================
   const faceSkin3 = (hautResult?.rawResults?.[0] as any)?.face_skin_metrics_3;
 
@@ -166,16 +167,9 @@ export function WebResultsScreen({
         | "sagging"
         | "dark_circles"
     ) => {
-      const masksFront =
-        faceSkin3.parameters?.[metricKey]?.masks?.front ?? {};
-      if (chosenVariant && masksFront[chosenVariant]) {
-        return masksFront[chosenVariant];
-      }
-      return (
-        masksFront.aligned_face ||
-        masksFront.anonymised ||
-        masksFront.original
-      );
+      const masksFront = faceSkin3.parameters?.[metricKey]?.masks?.front ?? {};
+      if (chosenVariant && masksFront[chosenVariant]) return masksFront[chosenVariant];
+      return masksFront.aligned_face || masksFront.anonymised || masksFront.original;
     };
 
     hautLinesMaskUrl = getMask("lines");
@@ -187,54 +181,77 @@ export function WebResultsScreen({
     hautDarkCirclesMaskUrl = getMask("dark_circles");
   }
 
-  const metricOptionsForPhoto = displayMetrics
-    .filter((m) => m.id !== SKIN_TYPE_ID)
-    .map((m) => ({
-      id: m.id,
-      name: m.name,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      label: (m as any).label,
-    }));
-
   // ============================
-  // 1) Actualizar métricas (scores + status + raw + biomarkers de Acne)
+  // 1) Actualizar métricas (scores + status + raw + biomarkers)
+  //    ✅ + Pigmentation FIXED
+  //    ✅ + Lines Deep/Fine FIXED (using face_skin_metrics_3.parameters.deep_lines/fine_lines)
   // ============================
   useEffect(() => {
-    if (!hautResult || !hautResult.metrics || hautResult.metrics.length === 0) {
-      return;
-    }
+    if (!hautResult || !hautResult.metrics || hautResult.metrics.length === 0) return;
+
+    // ✅ Fuente real de deep_lines / fine_lines
+    const fs3Params =
+      (hautResult.rawResults?.[0] as any)?.face_skin_metrics_3?.parameters ?? {};
+
+    const deepLinesScoreReal =
+      typeof fs3Params?.deep_lines?.score === "number"
+        ? fs3Params.deep_lines.score
+        : typeof fs3Params?.deep_wrinkles?.score === "number"
+        ? fs3Params.deep_wrinkles.score
+        : undefined;
+
+    const fineLinesScoreReal =
+      typeof fs3Params?.fine_lines?.score === "number"
+        ? fs3Params.fine_lines.score
+        : typeof fs3Params?.fine_wrinkles?.score === "number"
+        ? fs3Params.fine_wrinkles.score
+        : undefined;
 
     setDisplayMetrics((prev) => {
       const byId = new Map<string, SkinMetric>();
       prev.forEach((m) => byId.set(m.id, m));
 
       for (const m of hautResult.metrics) {
-        const tech = (m.techName || "").toLowerCase();
+        const tech = String((m as any).techName || "").toLowerCase();
         const mappedId = TECH_NAME_TO_SKIN_METRIC_ID[tech];
         if (!mappedId) continue;
 
         const existing = byId.get(mappedId);
         if (!existing) continue;
 
+        const nameLower = String(existing.name || "").toLowerCase();
+
         const isAcneMetric =
-          mappedId === "acne" ||
-          existing.name.toLowerCase().includes("acne") ||
-          tech === "acne";
+          mappedId === "acne" || nameLower.includes("acne") || tech === "acne";
+        const isPoresMetric =
+          mappedId === "pores" || nameLower.includes("pore") || tech === "pores";
+        const isRednessMetric =
+          mappedId === "redness" || nameLower.includes("redness") || tech === "redness";
+        const isSaggingMetric =
+          mappedId === "sagging" || nameLower.includes("sagging") || tech === "sagging";
+        const isPigmentationMetric =
+          mappedId === "pigmentation" || nameLower.includes("pigment") || tech === "pigmentation";
+        const isLinesMetric =
+          mappedId === "lines_wrinkles" || nameLower.includes("line") || tech === "lines";
+
+        const rawAny: any = (m as any).raw ?? (existing as any).raw ?? {};
+        const scoreDescription =
+          typeof rawAny?.score_description === "string" ? rawAny.score_description : undefined;
 
         let updated: SkinMetric = {
           ...existing,
-          score: m.value ?? existing.score,
-          status: (m.tag as any) || existing.status,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          raw: (m as any).raw ?? (existing as any).raw,
+          score: (m as any).value ?? existing.score,
+          status: ((m as any).tag as any) || existing.status,
+          raw: rawAny,
+          ...(scoreDescription ? { description: scoreDescription } : {}),
+          ...(m.maskUrl ? ({ maskUrl: m.maskUrl } as any) : {}),
         };
 
+        // ✅ ACNE biomarkers
         if (isAcneMetric) {
-          const acneRaw: any = (m as any).raw || {};
-
-          console.log("[Bloom DEBUG] ACNE dynamic.raw:", acneRaw);
-
+          const acneRaw: any = rawAny || {};
           const pimplesCount =
+            acneRaw?.pimples?.amount ??
             acneRaw?.pimples?.count ??
             acneRaw?.pimples_count ??
             acneRaw?.number_of_pimples ??
@@ -242,6 +259,7 @@ export function WebResultsScreen({
             undefined;
 
           const acneDensity =
+            acneRaw?.inflammation?.density ??
             acneRaw?.acne_inflammation?.density ??
             acneRaw?.density ??
             undefined;
@@ -249,21 +267,137 @@ export function WebResultsScreen({
           updated = {
             ...updated,
             biomarkers: [
-              {
-                label: "Number of pimples",
-                value:
-                  pimplesCount ??
-                  existing.biomarkers?.[0]?.value ??
-                  "—",
-              },
-              {
-                label: "Acne inflammation (density)",
-                value:
-                  acneDensity ??
-                  existing.biomarkers?.[1]?.value ??
-                  "—",
-              },
+              { label: "Number of pimples", value: pimplesCount ?? existing.biomarkers?.[0]?.value ?? "—" },
+              { label: "Density", value: acneDensity ?? existing.biomarkers?.[1]?.value ?? "—" },
             ],
+          };
+        }
+
+        // ✅ PORES biomarkers
+        if (isPoresMetric) {
+          const poresRaw: any = rawAny || {};
+          const poresTotal =
+            poresRaw?.amount ??
+            poresRaw?.pores_amount ??
+            (typeof poresRaw?.areas === "object"
+              ? Object.values(poresRaw.areas || {}).reduce((acc: number, a: any) => {
+                  const v = typeof a?.amount === "number" ? a.amount : 0;
+                  return acc + v;
+                }, 0)
+              : undefined);
+
+          const enlargedTotal =
+            poresRaw?.enlarged_pores?.amount ??
+            poresRaw?.enlarged_pores_amount ??
+            (typeof poresRaw?.enlarged_pores?.areas === "object"
+              ? Object.values(poresRaw.enlarged_pores.areas || {}).reduce(
+                  (acc: number, a: any) => {
+                    const v = typeof a?.amount === "number" ? a.amount : 0;
+                    return acc + v;
+                  },
+                  0
+                )
+              : undefined);
+
+          updated = {
+            ...updated,
+            biomarkers: [
+              { label: "Number of pores", value: poresTotal ?? existing.biomarkers?.[0]?.value ?? "—" },
+              { label: "Enlarged pores", value: enlargedTotal ?? existing.biomarkers?.[1]?.value ?? "—" },
+            ],
+          };
+        }
+
+        // ✅ REDNESS biomarker
+        if (isRednessMetric) {
+          const rednessRaw: any = rawAny || {};
+          const irritationScore =
+            rednessRaw?.irritation?.score ?? rednessRaw?.irritation_score ?? undefined;
+
+          updated = {
+            ...updated,
+            biomarkers: [{ label: "Irritation", value: irritationScore ?? existing.biomarkers?.[0]?.value ?? "—" }],
+          };
+        }
+
+        // ✅ SAGGING biomarkers
+        if (isSaggingMetric) {
+          const sagRaw: any = rawAny || {};
+          const jowlsGrade =
+            sagRaw?.jowls?.grade ?? sagRaw?.jowls_grade ?? sagRaw?.jowls?.value ?? undefined;
+
+          const lacrimalScore =
+            sagRaw?.lacrimal_grooves?.score ??
+            sagRaw?.lacrimal_grooves_score ??
+            sagRaw?.tear_trough?.score ??
+            sagRaw?.tear_troughs?.score ??
+            undefined;
+
+          updated = {
+            ...updated,
+            biomarkers: [
+              { label: "Jowls", value: jowlsGrade ?? existing.biomarkers?.[0]?.value ?? "—" },
+              { label: "Lacrimal grooves", value: lacrimalScore ?? existing.biomarkers?.[1]?.value ?? "—" },
+            ],
+          };
+        }
+
+        // ✅ PIGMENTATION biomarkers (uses enriched keys if present)
+        if (isPigmentationMetric) {
+          const pigRaw: any = rawAny || {};
+          const frecklesDensity = pigRaw?.freckles_density ?? pigRaw?.freckles?.density ?? undefined;
+
+          const molesAmount =
+            pigRaw?.moles_count ??
+            pigRaw?.moles_amount ??
+            pigRaw?.moles?.number_of_moles ??
+            pigRaw?.moles?.count ??
+            pigRaw?.moles?.amount ??
+            undefined;
+
+          const melasmaDensity = pigRaw?.melasma_density ?? pigRaw?.melasma?.density ?? undefined;
+
+          const sunSpotsDensity =
+            pigRaw?.sun_spots_density ??
+            pigRaw?.sun_spots?.density ??
+            pigRaw?.sunspots_density ??
+            undefined;
+
+          updated = {
+            ...updated,
+            biomarkers: [
+              { label: "Freckles", value: frecklesDensity ?? existing.biomarkers?.[0]?.value ?? "—" },
+              { label: "Moles", value: molesAmount ?? existing.biomarkers?.[1]?.value ?? "—" },
+              { label: "Melasma", value: melasmaDensity ?? existing.biomarkers?.[2]?.value ?? "—" },
+              { label: "Sun spots", value: sunSpotsDensity ?? existing.biomarkers?.[3]?.value ?? "—" },
+            ],
+          };
+        }
+
+        // ✅✅ LINES FIX: NO uses the main lines score for deep/fine.
+        // Pull real values from face_skin_metrics_3.parameters.deep_lines / fine_lines
+        if (isLinesMetric) {
+          const linesRaw: any = rawAny || {};
+
+          const deepScore =
+            typeof linesRaw?.deep_lines?.score === "number"
+              ? linesRaw.deep_lines.score
+              : deepLinesScoreReal;
+
+          const fineScore =
+            typeof linesRaw?.fine_lines?.score === "number"
+              ? linesRaw.fine_lines.score
+              : fineLinesScoreReal;
+
+          updated = {
+            ...updated,
+            raw: {
+              ...linesRaw,
+              deep_lines: linesRaw?.deep_lines ?? (typeof deepScore === "number" ? { score: deepScore } : undefined),
+              fine_lines: linesRaw?.fine_lines ?? (typeof fineScore === "number" ? { score: fineScore } : undefined),
+              deep_lines_score: linesRaw?.deep_lines_score ?? deepScore,
+              fine_lines_score: linesRaw?.fine_lines_score ?? fineScore,
+            },
           };
         }
 
@@ -273,39 +407,32 @@ export function WebResultsScreen({
       return Array.from(byId.values());
     });
 
+    // Guardamos masks en mapa
     setMetricMasks((prevMasks) => {
       const next = { ...prevMasks };
-
       for (const m of hautResult.metrics) {
-        const tech = (m.techName || "").toLowerCase();
+        const tech = String((m as any).techName || "").toLowerCase();
         const mappedId = TECH_NAME_TO_SKIN_METRIC_ID[tech];
         if (!mappedId) continue;
-
-        if (m.maskUrl) {
-          next[mappedId] = m.maskUrl;
-        }
+        if ((m as any).maskUrl) next[mappedId] = (m as any).maskUrl;
       }
-
       return next;
     });
   }, [hautResult]);
 
   // ============================
-  // 2) Actualizar Skin Type + Skin Age + Skin Tone (ITA) desde Haut
+  // 2) OverallHealth desde Haut
   // ============================
   useEffect(() => {
     if (!hautResult || !hautResult.rawResults?.length) return;
-
     const rawBlock = hautResult.rawResults[0];
     const mapped = mapFaceSkin3ToOverallHealth(rawBlock);
-
     if (!mapped) return;
-
     setDynamicOverallHealth(mapped);
   }, [hautResult]);
 
   // ============================
-  // 3) Calcular Overall Health como promedio de 7 métricas
+  // 3) Overall Health promedio
   // ============================
   useEffect(() => {
     if (!displayMetrics || displayMetrics.length === 0) return;
@@ -313,20 +440,16 @@ export function WebResultsScreen({
     const relevantMetrics = displayMetrics.filter((m) =>
       OVERALL_METRIC_IDS.includes(m.id)
     );
-
     if (relevantMetrics.length === 0) return;
 
     const sum = relevantMetrics.reduce((acc, m) => acc + (m.score ?? 0), 0);
     const avg = Math.round(sum / relevantMetrics.length);
 
-    setDynamicOverallHealth((prev) => ({
-      ...prev,
-      score: avg,
-    }));
+    setDynamicOverallHealth((prev) => ({ ...prev, score: avg }));
   }, [displayMetrics]);
 
   // ============================
-  // 4A) Guardar SIEMPRE el último análisis (overwrite)
+  // 4A) Guardar último análisis
   // ============================
   useEffect(() => {
     if (!hautResult) return;
@@ -338,18 +461,21 @@ export function WebResultsScreen({
         "bloom_last_scan_metrics",
         JSON.stringify(displayMetrics)
       );
-
       localStorage.setItem(
         "bloom_last_overall_health",
         JSON.stringify(dynamicOverallHealth)
       );
+      localStorage.setItem(
+        "bloom_last_metric_masks_v1",
+        JSON.stringify(metricMasks)
+      );
     } catch (err) {
       console.error("[Bloom] Error saving last analysis to localStorage", err);
     }
-  }, [hautResult, displayMetrics, dynamicOverallHealth]);
+  }, [hautResult, displayMetrics, dynamicOverallHealth, metricMasks]);
 
   // ============================
-  // 4B) Guardar UNA VEZ el scan en el histórico de fotos
+  // 4B) Guardar UNA VEZ en histórico
   // ============================
   useEffect(() => {
     if (!hautResult) return;
@@ -359,19 +485,17 @@ export function WebResultsScreen({
     try {
       fakeBackend.saveScan(capturedImage, "camera");
       hasPersistedRef.current = true;
-      console.log("[Bloom] Scan saved in fakeBackend history");
     } catch (err) {
       console.error("[Bloom] Error saving scan to fakeBackend", err);
     }
   }, [hautResult, capturedImage]);
 
   // ============================
-  // 5) Generar rutina con OpenAI (backend /api/recommendations)
+  // 5) Rutina OpenAI
   // ============================
   useEffect(() => {
-    if (!hautResult || !hautResult.metrics || hautResult.metrics.length === 0) {
+    if (!hautResult || !hautResult.metrics || hautResult.metrics.length === 0)
       return;
-    }
 
     const controller = new AbortController();
 
@@ -379,8 +503,6 @@ export function WebResultsScreen({
       try {
         setIsLoadingRoutine(true);
         setRoutineError(null);
-
-        console.log("[Bloom Front] Calling /api/recommendations…");
 
         const res = await fetch(`${BLOOM_SERVER_URL}/api/recommendations`, {
           method: "POST",
@@ -394,29 +516,23 @@ export function WebResultsScreen({
 
         if (!res.ok) {
           const text = await res.text();
-          console.error("[Bloom Front] Error fetching routine", text);
-          throw new Error(`Error fetching routine (${res.status})`);
+          throw new Error(`Error fetching routine (${res.status}): ${text}`);
         }
 
         const data = (await res.json()) as BloomRoutineResponse;
-        console.log("[Bloom Front] Routine received:", data);
-
         setRoutine(data);
 
-        // Guardamos la rutina del último scan para que el dashboard la use
         try {
           localStorage.setItem("bloom_last_routine_v1", JSON.stringify(data));
           localStorage.setItem(
             "bloom_last_routine_created_at_v1",
             new Date().toISOString()
           );
-          console.log("[Bloom] Last routine persisted to localStorage");
         } catch (err) {
           console.error("[Bloom] Error saving last routine", err);
         }
       } catch (error: any) {
-        if (error.name === "AbortError") return;
-        console.error("[Bloom Front] Error fetching routine", error);
+        if (error?.name === "AbortError") return;
         setRoutineError(
           "No hemos podido generar tu rutina personalizada ahora mismo. Volveremos a intentarlo en tu próximo escaneo."
         );
@@ -426,7 +542,6 @@ export function WebResultsScreen({
     }
 
     fetchRoutine();
-
     return () => controller.abort();
   }, [hautResult, displayMetrics, dynamicOverallHealth]);
 
@@ -444,7 +559,7 @@ export function WebResultsScreen({
   };
 
   // ============================
-  // Fallbacks (sin imagen / loading / error Haut)
+  // Fallbacks
   // ============================
   if (!capturedImage) {
     return (
@@ -462,7 +577,7 @@ export function WebResultsScreen({
           </p>
           <Button
             type="button"
-            className="w-full h-11 bg-[#111827] text.white font-['Manrope',sans-serif]"
+            className="w-full h-11 bg-[#111827] text-white font-['Manrope',sans-serif]"
             onClick={() => {
               window.location.href = "/";
             }}
@@ -526,12 +641,13 @@ export function WebResultsScreen({
     <>
       <div ref={reportRef} className="min-h-screen bg-[#F5F5F5]">
         {/* Header */}
-        <div className="bg-white border-b border-[#E5E5E5] px-8 py-6 sticky top-0 z-10">
+        <div className="bg-white border-b border-[#E5E5E5] px-8 py-4 sticky top-0 z-10">
           <div className="max-w-7xl mx-auto">
-            <div className="flex items-start justify-between mb-4">
-              <div>
+            <div className="flex items-center justify-between gap-6">
+              {/* Left: Title */}
+              <div className="min-w-0">
                 <h1
-                  className="text-[#18212D] font-['Manrope',sans-serif]"
+                  className="text-[#18212D] font-['Manrope',sans-serif] truncate"
                   style={{ fontSize: "32px", lineHeight: "40px" }}
                 >
                   Your Skin Analysis Results
@@ -541,41 +657,44 @@ export function WebResultsScreen({
                   Analyzed on {formatDate(new Date())}
                 </p>
               </div>
-              <img src={bloomLogo} alt="Bloom" className="h-12" />
-            </div>
 
-                        {/* Action Buttons */}
-                        <div className="flex flex-wrap justify-center gap-3">
-              {/* Go to Dashboard – CTA principal */}
-              <Button
-                type="button"
-                onClick={() => onViewDashboard?.()}
-                className="h-12 px-8 bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] text-white rounded-full border-0 hover:opacity-90 flex items-center justify-center font-['Manrope',sans-serif] transition-all duration-300"
-              >
-                <LayoutDashboard className="w-4 h-4 mr-2" />
-                Go to Dashboard
-              </Button>
+              {/* Center: Actions */}
+              <div className="flex items-center gap-3 shrink-0">
+                <Button
+                  type="button"
+                  onClick={() => onViewDashboard?.()}
+                  className="bloom-btn h-11 px-7 rounded-full border-0 font-['Manrope',sans-serif] text-white bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] hover:opacity-95"
+                >
+                  <LayoutDashboard className="w-4 h-4 mr-2" />
+                  Go to Dashboard
+                </Button>
 
-              {/* Share */}
-              <Button
-                type="button"
-                onClick={() => setIsShareOpen(true)}
-                className="h-12 px-6 bg-white text-[#FF6B4A] border border-[#FF6B4A] hover:bg-[#FFF5F3] hover:text-[#FF6B4A] rounded-full flex items-center justify-center font-['Manrope',sans-serif] transition-all duration-300"
-              >
-                <Share2 className="w-4 h-4 mr-2" />
-                Share
-              </Button>
+                <Button
+                  type="button"
+                  onClick={() => setIsShareOpen(true)}
+                  className="bloom-btn h-11 px-7 rounded-full font-['Manrope',sans-serif] bg-white/70 backdrop-blur border border-[#FF6B4A]/40 text-[#FF6B4A] hover:bg-white"
+                >
+                  <Share2 className="w-4 h-4 mr-2" />
+                  Share
+                </Button>
 
-              {/* Download Report */}
-              <Button
-                type="button"
-                onClick={handleDownloadReport}
-                disabled={isDownloading}
-                className="h-12 px-6 bg-white text-[#FF6B4A] border border-[#FF6B4A] hover:bg-[#FFF5F3] hover:text-[#FF6B4A] rounded-full flex items-center justify-center font-['Manrope',sans-serif] transition-all duration-300 disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                <Download className="w-4 h-4 mr-2" />
-                {isDownloading ? "Generating PDF..." : "Download Report"}
-              </Button>
+                <Button
+                  type="button"
+                  onClick={handleDownloadReport}
+                  disabled={isDownloading}
+                  className="bloom-btn h-11 px-7 rounded-full font-['Manrope',sans-serif] bg-white/70 backdrop-blur border border-[#FF6B4A]/40 text-[#FF6B4A] hover:bg-white disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  {isDownloading ? "Generating…" : "Download"}
+                </Button>
+              </div>
+
+              {/* Right: Logo */}
+              <img
+                src={bloomLogo}
+                alt="Bloom"
+                className="h-10 w-auto shrink-0"
+              />
             </div>
           </div>
         </div>
@@ -612,15 +731,13 @@ export function WebResultsScreen({
             >
               Detailed Analysis
             </h2>
+
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               {displayMetrics.map((metric) => (
                 <MetricCard
                   key={metric.id}
                   metric={metric}
-                  onClick={(m) => {
-                    setSelectedMetric(m);
-                    setActiveMetricId(m.id);
-                  }}
+                  onClick={(m) => setSelectedMetric(m)}
                 />
               ))}
             </div>
@@ -636,25 +753,25 @@ export function WebResultsScreen({
             </h2>
 
             {isLoadingRoutine && (
-              <p className="text-sm text-[#6B7280] mb-4">
+              <p className="text-sm text-[#6B7280] mb-4 font-['Manrope',sans-serif]">
                 Generating your personalized routine...
               </p>
             )}
 
             {routineError && !routine && (
-              <p className="text-sm text-red-500 mb-4">{routineError}</p>
+              <p className="text-sm text-red-500 mb-4 font-['Manrope',sans-serif]">
+                {routineError}
+              </p>
             )}
 
             {routine && (
               <div className="space-y-6">
-                {/* Resumen */}
                 {routine.summary && (
-                  <p className="text-sm text-[#4B5563] mb-2 max-w-3xl">
+                  <p className="text-sm text-[#4B5563] mb-2 max-w-3xl font-['Manrope',sans-serif]">
                     {routine.summary}
                   </p>
                 )}
 
-                {/* Tarjetas Morning / Evening / Weekly */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   {(["morning", "evening", "weekly"] as RoutineSectionId[]).map(
                     (sectionId) => {
@@ -682,7 +799,6 @@ export function WebResultsScreen({
                           key={section.id}
                           className="bg-white rounded-2xl border border-[#E5E5E5] p-6 shadow-sm flex flex-col"
                         >
-                          {/* Header sección (estilo RoutineCard) */}
                           <div className="flex items-center gap-3 mb-4">
                             <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#FF6B4A] to-[#FFA94D] flex items-center justify-center">
                               <span className="text-xl text-white">{icon}</span>
@@ -697,7 +813,6 @@ export function WebResultsScreen({
                             </div>
                           </div>
 
-                          {/* Steps como bloques grises */}
                           <div className="space-y-3">
                             {section.steps.map((step) => (
                               <div
@@ -729,7 +844,7 @@ export function WebResultsScreen({
                 </div>
 
                 {routine.disclaimer && (
-                  <p className="mt-4 mb-10 text-[10px] italic text-[#9CA3AF] max-w-3xl">
+                  <p className="mt-4 mb-10 text-[10px] italic text-[#9CA3AF] max-w-3xl font-['Manrope',sans-serif]">
                     * {routine.disclaimer}
                   </p>
                 )}
@@ -737,39 +852,12 @@ export function WebResultsScreen({
             )}
 
             {!routine && !isLoadingRoutine && !routineError && (
-              <p className="text-sm text-[#9CA3AF]">
+              <p className="text-sm text-[#9CA3AF] font-['Manrope',sans-serif]">
                 We&apos;ll generate a personalized routine right after your next
                 scan.
               </p>
             )}
           </div>
-
-          {/* CTA Dashboard */}
-          {onViewDashboard && (
-            <div className="bg-gradient-to-br from-white to-orange-50/30 rounded-3xl border border-[#E5E5E5] p-12 text-center shadow-lg mt-10">
-              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-[#FF6B4A] to-[#FFA94D] flex items-center justify-center mx-auto mb-6">
-                <LayoutDashboard className="w-10 h-10 text-white" />
-              </div>
-              <h2
-                className="text-[#18212D] mb-3 font-['Manrope',sans-serif]"
-                style={{ fontSize: "28px", lineHeight: "36px" }}
-              >
-                Ready to Track Your Progress?
-              </h2>
-              <p className="text-[#6B7280] mb-8 max-w-2xl mx-auto font-['Manrope',sans-serif]">
-                Access your personalized dashboard to chat with your AI
-                assistant, monitor your skin improvements over time, and view
-                your complete scan history.
-              </p>
-              <Button
-                type="button"
-                onClick={() => onViewDashboard?.()}
-                className="h-14 px-12 bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] hover:from-[#E74C3C] hover:to-[#FF8C42] text-white rounded-full shadow-xl border-0 font-['Manrope',sans-serif] text-lg"
-              >
-                Go to Dashboard
-              </Button>
-            </div>
-          )}
         </div>
       </div>
 

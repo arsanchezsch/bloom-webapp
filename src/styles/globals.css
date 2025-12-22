@@ -280,3 +280,45 @@ html {
   width: 40px !important;
   height: 40px !important;
 }
+
+/* Bloom button system (matches header actions) */
+.bloom-btn {
+  height: 44px; /* h-11 */
+  padding-left: 28px; /* px-7 */
+  padding-right: 28px;
+  border-radius: 9999px; /* rounded-full */
+  font-family: Manrope, ui-sans-serif, system-ui;
+  font-size: 14px;
+  line-height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: opacity 150ms ease, background-color 150ms ease, transform 150ms ease;
+}
+
+.bloom-btn--primary {
+  color: white;
+  border: 0;
+  background: linear-gradient(90deg, #ff6b4a, #ffa94d);
+}
+
+.bloom-btn--primary:hover {
+  opacity: 0.95;
+}
+
+.bloom-btn--secondary {
+  color: #ff6b4a;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 107, 74, 0.4);
+}
+
+.bloom-btn--secondary:hover {
+  background: white;
+}
+
+.bloom-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

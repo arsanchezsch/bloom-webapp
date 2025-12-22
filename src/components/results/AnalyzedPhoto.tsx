@@ -1,34 +1,57 @@
 // ============================================
 // ANALYZED PHOTO COMPONENT
-// Displays the user's analyzed photo with dropdown to highlight different face areas
+// FINAL + PIGMENTATION + DARK CIRCLES FIX (front/left/right priority)
+//
+// FIX "images look a bit dull":
+// - Apply subtle global photo boost filter to BOTH aligned_face + base photo
+// - Use a darker background behind images to avoid "wash" perception
+//
+// FIX Pigmentation slight drift:
+// - Only apply HAUT_MASK_OFFSET for pigmentation when using MASK-ONLY fallback
+// - If aligned_face exists => NO offset (pixel-perfect)
 // ============================================
 
-import { useState } from "react";
-import { ChevronDown } from "lucide-react";
-import { formatDate, formatTime } from "../../utils/helpers";
+import { useMemo, useState } from "react";
 
 interface AnalyzedPhotoProps {
   imageUrl: string;
-  // Foto alineada de Haut (mismo zoom que Lines en el modal)
+
   hautFaceImageUrl?: string;
-  // Máscara real de líneas de Haut
+
   hautLinesMaskUrl?: string;
-  // Máscara real de poros de Haut
   hautPoresMaskUrl?: string;
-  // Máscara real de pigmentación
   hautPigmentationMaskUrl?: string;
-  // Máscara real de acné / breakouts
   hautAcneMaskUrl?: string;
-  // Máscara real de redness
   hautRednessMaskUrl?: string;
-  // Máscara real de sagging
   hautSaggingMaskUrl?: string;
-  // Máscara real de dark circles
   hautDarkCirclesMaskUrl?: string;
+
+  hautLinesAlignedFaceUrl?: string;
+  hautPoresAlignedFaceUrl?: string;
+  hautPigmentationAlignedFaceUrl?: string;
+  hautAcneAlignedFaceUrl?: string;
+  hautRednessAlignedFaceUrl?: string;
+  hautSaggingAlignedFaceUrl?: string;
+  hautDarkCirclesAlignedFaceUrl?: string;
+
+  hautPigmentationMaskUrlFront?: string;
+  hautPigmentationMaskUrlLeft?: string;
+  hautPigmentationMaskUrlRight?: string;
+
+  hautPigmentationAlignedFaceUrlFront?: string;
+  hautPigmentationAlignedFaceUrlLeft?: string;
+  hautPigmentationAlignedFaceUrlRight?: string;
+
+  hautDarkCirclesMaskUrlFront?: string;
+  hautDarkCirclesMaskUrlLeft?: string;
+  hautDarkCirclesMaskUrlRight?: string;
+
+  hautDarkCirclesAlignedFaceUrlFront?: string;
+  hautDarkCirclesAlignedFaceUrlLeft?: string;
+  hautDarkCirclesAlignedFaceUrlRight?: string;
 }
 
 type MetricHighlight =
-  | "none"
   | "acne"
   | "pores"
   | "pigmentation"
@@ -37,20 +60,25 @@ type MetricHighlight =
   | "dark_circles"
   | "lines";
 
-const METRIC_OPTIONS = [
-  { value: "none" as const, label: "No Highlighting" },
-  { value: "acne" as const, label: "Acne" },
-  { value: "pores" as const, label: "Pores" },
-  { value: "pigmentation" as const, label: "Pigmentation" },
-  { value: "redness" as const, label: "Redness" },
-  { value: "sagging" as const, label: "Sagging" },
-  { value: "dark_circles" as const, label: "Dark Circles" },
-  { value: "lines" as const, label: "Lines & Wrinkles" },
+const METRIC_OPTIONS: Array<{ value: MetricHighlight; label: string }> = [
+  { value: "acne", label: "Acne" },
+  { value: "pores", label: "Pores" },
+  { value: "pigmentation", label: "Pigmentation" },
+  { value: "redness", label: "Redness" },
+  { value: "sagging", label: "Sagging" },
+  { value: "dark_circles", label: "Dark Circles" },
+  { value: "lines", label: "Lines & Wrinkles" },
 ];
+
+const HAUT_MASK_OFFSET = {
+  xPercent: -1.5,
+  yPercent: -1.0,
+};
 
 export function AnalyzedPhoto({
   imageUrl,
   hautFaceImageUrl,
+
   hautLinesMaskUrl,
   hautPoresMaskUrl,
   hautPigmentationMaskUrl,
@@ -58,214 +86,273 @@ export function AnalyzedPhoto({
   hautRednessMaskUrl,
   hautSaggingMaskUrl,
   hautDarkCirclesMaskUrl,
+
+  hautLinesAlignedFaceUrl,
+  hautPoresAlignedFaceUrl,
+  hautPigmentationAlignedFaceUrl,
+  hautAcneAlignedFaceUrl,
+  hautRednessAlignedFaceUrl,
+  hautSaggingAlignedFaceUrl,
+  hautDarkCirclesAlignedFaceUrl,
+
+  hautPigmentationMaskUrlFront,
+  hautPigmentationMaskUrlLeft,
+  hautPigmentationMaskUrlRight,
+  hautPigmentationAlignedFaceUrlFront,
+  hautPigmentationAlignedFaceUrlLeft,
+  hautPigmentationAlignedFaceUrlRight,
+
+  hautDarkCirclesMaskUrlFront,
+  hautDarkCirclesMaskUrlLeft,
+  hautDarkCirclesMaskUrlRight,
+  hautDarkCirclesAlignedFaceUrlFront,
+  hautDarkCirclesAlignedFaceUrlLeft,
+  hautDarkCirclesAlignedFaceUrlRight,
 }: AnalyzedPhotoProps) {
-  const now = new Date();
-  const [selectedMetric, setSelectedMetric] = useState<MetricHighlight>("none");
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [selectedMetric, setSelectedMetric] =
+    useState<MetricHighlight | undefined>("acne");
 
-  const isLinesMetric = selectedMetric === "lines";
-  const isPoresMetric = selectedMetric === "pores";
-  const isPigmentationMetric = selectedMetric === "pigmentation";
-  const isAcneMetric = selectedMetric === "acne";
-  const isRednessMetric = selectedMetric === "redness";
-  const isSaggingMetric = selectedMetric === "sagging";
-  const isDarkCirclesMetric = selectedMetric === "dark_circles";
+  // ✅ Subtle global photo boost to match Haut's "pop"
+  const photoBoostFilter = "brightness(1.04) contrast(1.08) saturate(1.08)";
+  // ✅ Background behind the image (black makes colors feel richer)
+  const imageBg = "#000"; // try "#FFF" if you prefer a lighter look
 
-  // ⚠️ Igual que en el modal: siempre usamos la foto alineada si existe
+  // ✅ helper: best pigmentation urls by priority
+  const bestPigmentationAlignedFace =
+    hautPigmentationAlignedFaceUrlFront ||
+    hautPigmentationAlignedFaceUrlLeft ||
+    hautPigmentationAlignedFaceUrlRight ||
+    hautPigmentationAlignedFaceUrl;
+
+  const bestPigmentationMaskOnly =
+    hautPigmentationMaskUrlFront ||
+    hautPigmentationMaskUrlLeft ||
+    hautPigmentationMaskUrlRight ||
+    hautPigmentationMaskUrl;
+
+  // ✅ helper: best dark circles urls by priority
+  const bestDarkCirclesAlignedFace =
+    hautDarkCirclesAlignedFaceUrlFront ||
+    hautDarkCirclesAlignedFaceUrlLeft ||
+    hautDarkCirclesAlignedFaceUrlRight ||
+    hautDarkCirclesAlignedFaceUrl;
+
+  const bestDarkCirclesMaskOnly =
+    hautDarkCirclesMaskUrlFront ||
+    hautDarkCirclesMaskUrlLeft ||
+    hautDarkCirclesMaskUrlRight ||
+    hautDarkCirclesMaskUrl;
+
+  const selectedMaskUrl = useMemo(() => {
+    switch (selectedMetric) {
+      case "lines":
+        return hautLinesMaskUrl;
+      case "pores":
+        return hautPoresMaskUrl;
+      case "pigmentation":
+        return bestPigmentationMaskOnly;
+      case "acne":
+        return hautAcneMaskUrl;
+      case "redness":
+        return hautRednessMaskUrl;
+      case "sagging":
+        return hautSaggingMaskUrl;
+      case "dark_circles":
+        return bestDarkCirclesMaskOnly;
+      default:
+        return undefined;
+    }
+  }, [
+    selectedMetric,
+    hautLinesMaskUrl,
+    hautPoresMaskUrl,
+    bestPigmentationMaskOnly,
+    hautAcneMaskUrl,
+    hautRednessMaskUrl,
+    hautSaggingMaskUrl,
+    bestDarkCirclesMaskOnly,
+  ]);
+
+  const selectedAlignedFaceUrl = useMemo(() => {
+    switch (selectedMetric) {
+      case "lines":
+        return hautLinesAlignedFaceUrl;
+      case "pores":
+        return hautPoresAlignedFaceUrl;
+      case "pigmentation":
+        return bestPigmentationAlignedFace;
+      case "acne":
+        return hautAcneAlignedFaceUrl;
+      case "redness":
+        return hautRednessAlignedFaceUrl;
+      case "sagging":
+        return hautSaggingAlignedFaceUrl;
+      case "dark_circles":
+        return bestDarkCirclesAlignedFace;
+      default:
+        return undefined;
+    }
+  }, [
+    selectedMetric,
+    hautLinesAlignedFaceUrl,
+    hautPoresAlignedFaceUrl,
+    bestPigmentationAlignedFace,
+    hautAcneAlignedFaceUrl,
+    hautRednessAlignedFaceUrl,
+    hautSaggingAlignedFaceUrl,
+    bestDarkCirclesAlignedFace,
+  ]);
+
+  const firstRow = METRIC_OPTIONS.slice(0, 4);
+  const secondRow = METRIC_OPTIONS.slice(4);
+
   const basePhoto = hautFaceImageUrl || imageUrl;
 
-  // ¿Tenemos máscara real para la métrica seleccionada?
-  const hasMaskForSelected =
-    (isLinesMetric && !!hautLinesMaskUrl) ||
-    (isPoresMetric && !!hautPoresMaskUrl) ||
-    (isPigmentationMetric && !!hautPigmentationMaskUrl) ||
-    (isAcneMetric && !!hautAcneMaskUrl) ||
-    (isRednessMetric && !!hautRednessMaskUrl) ||
-    (isSaggingMetric && !!hautSaggingMaskUrl) ||
-    (isDarkCirclesMetric && !!hautDarkCirclesMaskUrl);
+  const useAlignedFaceDirectly = !!selectedMetric && !!selectedAlignedFaceUrl;
 
-  const selectedOption = METRIC_OPTIONS.find(
-    (opt) => opt.value === selectedMetric
-  );
+  const showNoConcernsText =
+    selectedMetric !== undefined && !selectedAlignedFaceUrl && !selectedMaskUrl;
+
+  // ✅ FIX: pigmentation offset ONLY when it's mask-only fallback (no aligned_face)
+  const overlayTransform =
+    selectedMetric === "pigmentation" && !selectedAlignedFaceUrl
+      ? `translate(${HAUT_MASK_OFFSET.xPercent}%, ${HAUT_MASK_OFFSET.yPercent}%)`
+      : "translate(0%, 0%)";
+
+  const overlayOpacity =
+    selectedMetric === "lines"
+      ? 0.65
+      : selectedMetric === "redness"
+      ? 0.55
+      : selectedMetric === "pores"
+      ? 0.6
+      : selectedMetric === "sagging"
+      ? 0.65
+      : selectedMetric === "dark_circles"
+      ? 0.62
+      : selectedMetric === "acne"
+      ? 0.7
+      : selectedMetric === "pigmentation"
+      ? 0.8
+      : 0.75;
+
+  const overlayFilter =
+    selectedMetric === "lines"
+      ? "brightness(1.05) contrast(1.25) saturate(1.15)"
+      : selectedMetric === "redness"
+      ? "brightness(1.02) contrast(1.28) saturate(1.22)"
+      : selectedMetric === "pores"
+      ? "brightness(1.03) contrast(1.25) saturate(1.18)"
+      : selectedMetric === "sagging"
+      ? "brightness(1.03) contrast(1.22) saturate(1.12)"
+      : selectedMetric === "dark_circles"
+      ? "brightness(1.02) contrast(1.22) saturate(1.08)"
+      : selectedMetric === "pigmentation"
+      ? "brightness(1.05) contrast(1.15) saturate(1.2)"
+      : selectedMetric === "acne"
+      ? "brightness(1.05) contrast(1.1) saturate(1.1)"
+      : "brightness(1.05) contrast(1.15) saturate(1.15) blur(0.4px)";
 
   return (
-    <div className="bg-white rounded-3xl border border-[#E5E5E5] p-6 shadow-sm">
-      {/* Header with Dropdown */}
-      <div className="flex items-center justify-between mb-4">
-        <h3
-          className="text-[#18212D] font-['Manrope',sans-serif]"
-          style={{ fontSize: "20px", lineHeight: "28px" }}
+    <div className="bg-white rounded-3xl border border-[#E5E5E5] shadow-sm p-6">
+      {/* IMAGE */}
+      <div className="flex justify-center mb-2">
+        <div
+          className="relative rounded-2xl overflow-hidden border-2 border-[#E5E5E5] w-full"
+          style={{ maxWidth: "380px", aspectRatio: "4 / 5", background: imageBg }}
         >
-          Analyzed Photo
-        </h3>
-
-        {/* Metric Selector Dropdown */}
-        <div className="relative">
-          <button
-            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-            className="flex items-center gap-2 px-4 py-2 bg-white border border-[#E5E5E5] rounded-xl hover:border-[#FF6B4A] transition-all text-sm font-['Manrope',sans-serif]"
-          >
-            <span className="text-[#FF6B4A]">
-              Highlighting: {selectedOption?.label}
-            </span>
-            <ChevronDown
-              className={`w-4 h-4 text-[#FF6B4A] transition-transform ${
-                isDropdownOpen ? "rotate-180" : ""
-              }`}
+          {useAlignedFaceDirectly ? (
+            <img
+              src={selectedAlignedFaceUrl}
+              alt="Analyzed face"
+              className="w-full h-full"
+              style={{
+                background: imageBg,
+                objectFit: "cover",
+                filter: photoBoostFilter,
+              }}
+              draggable={false}
             />
-          </button>
+          ) : (
+            <>
+              <img
+                src={basePhoto}
+                alt="Analyzed face"
+                className="w-full h-full"
+                style={{
+                  background: imageBg,
+                  objectFit: "cover",
+                  filter: photoBoostFilter,
+                }}
+                draggable={false}
+              />
 
-          {/* Dropdown Menu */}
-          {isDropdownOpen && (
-            <div className="absolute right-0 top-full mt-2 w-64 bg-white border border-[#E5E5E5] rounded-xl shadow-lg z-10 overflow-hidden">
-              {METRIC_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  onClick={() => {
-                    setSelectedMetric(option.value);
-                    setIsDropdownOpen(false);
+              {selectedMetric && selectedMaskUrl && (
+                <img
+                  src={selectedMaskUrl}
+                  alt="Mask overlay"
+                  className="absolute inset-0 w-full h-full pointer-events-none mix-blend-screen"
+                  style={{
+                    objectFit: "cover",
+                    transform: overlayTransform,
+                    transformOrigin: "center center",
+                    opacity: overlayOpacity,
+                    filter: overlayFilter,
                   }}
-                  className={`w-full text-left px-4 py-3 hover:bg-[#FFF5F3] transition-colors font-['Manrope',sans-serif] text-sm ${
-                    selectedMetric === option.value
-                      ? "bg-[#FFF5F3] text-[#FF6B4A]"
-                      : "text-[#18212D]"
-                  }`}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
+                  draggable={false}
+                />
+              )}
+            </>
           )}
         </div>
       </div>
 
-      {/* Photo Container */}
-      <div
-        className="relative rounded-2xl overflow-hidden border-2 border-[#E5E5E5] bg-[#F5F5F5]"
-        style={{ aspectRatio: "4 / 5" }} // mismo ratio que el modal
-      >
-        {/* Foto base */}
-        <img
-          src={basePhoto}
-          alt="Your analyzed photo"
-          className="w-full h-full object-contain"
-        />
-
-        {/* Lines */}
-        {isLinesMetric && hautLinesMaskUrl && (
-          <img
-            src={hautLinesMaskUrl}
-            alt="Lines overlay"
-            className="absolute inset-0 w-full h-full object-contain pointer-events-none mix-blend-screen opacity-35"
-            style={{
-              filter:
-                "brightness(0.9) contrast(1.15) saturate(1.2) blur(0.5px)",
-            }}
-          />
-        )}
-
-        {/* Pores */}
-        {isPoresMetric && hautPoresMaskUrl && (
-          <img
-            src={hautPoresMaskUrl}
-            alt="Pores overlay"
-            className="absolute inset-0 w-full h-full object-contain pointer-events-none mix-blend-screen opacity-85"
-            style={{
-              filter: "brightness(1.1) contrast(1.3)",
-            }}
-          />
-        )}
-
-        {/* Pigmentation */}
-        {isPigmentationMetric && hautPigmentationMaskUrl && (
-          <img
-            src={hautPigmentationMaskUrl}
-            alt="Pigmentation overlay"
-            className="absolute inset-0 w-full h-full object-contain pointer-events-none mix-blend-screen opacity-80"
-            style={{
-              filter: "brightness(1.05) contrast(1.15) saturate(1.2)",
-            }}
-          />
-        )}
-
-        {/* Acne / Breakouts */}
-        {isAcneMetric && hautAcneMaskUrl && (
-          <img
-            src={hautAcneMaskUrl}
-            alt="Acne overlay"
-            className="absolute inset-0 w-full h-full object-contain pointer-events-none mix-blend-screen opacity-70"
-            style={{
-              filter: "brightness(1.05) contrast(1.1) saturate(1.1)",
-            }}
-          />
-        )}
-
-        {/* Redness */}
-        {isRednessMetric && hautRednessMaskUrl && (
-          <img
-            src={hautRednessMaskUrl}
-            alt="Redness overlay"
-            className="absolute inset-0 w-full h-full object-contain pointer-events-none mix-blend-screen opacity-65"
-            style={{
-              filter: "brightness(1.0) contrast(1.15) saturate(1.1)",
-            }}
-          />
-        )}
-
-        {/* Sagging */}
-        {isSaggingMetric && hautSaggingMaskUrl && (
-          <img
-            src={hautSaggingMaskUrl}
-            alt="Sagging overlay"
-            className="absolute inset-0 w-full h-full object-contain pointer-events-none mix-blend-screen opacity-70"
-            style={{
-              filter: "brightness(1.0) contrast(1.15) saturate(1.05)",
-            }}
-          />
-        )}
-
-        {/* Dark Circles */}
-        {isDarkCirclesMetric && hautDarkCirclesMaskUrl && (
-          <img
-            src={hautDarkCirclesMaskUrl}
-            alt="Dark circles overlay"
-            className="absolute inset-0 w-full h-full object-contain pointer-events-none mix-blend-screen opacity-75"
-            style={{
-              filter: "brightness(1.05) contrast(1.2) saturate(1.15)",
-            }}
-          />
-        )}
-        {/* ⛔️ Ya no hay overlays fake: si no hay máscara, solo se ve la foto limpia */}
-      </div>
-
-      {/* Timestamp */}
-      <div className="mt-4 flex items-center justify-between">
-        <p className="text-sm text-[#6B7280] font-['Manrope',sans-serif]">
-          {formatDate(now)}
+      {showNoConcernsText && (
+        <p className="mt-1 mb-3 text-center text-[10px] leading-[12px] text-[#9CA3AF] font-['Manrope',sans-serif]">
+          No visible concerns were detected in this area during the analysis
         </p>
-        <p className="text-sm text-[#6B7280] font-['Manrope',sans-serif]">
-          {formatTime(now)}
-        </p>
-      </div>
-
-      {/* Info Text */}
-      {selectedMetric !== "none" && (
-        hasMaskForSelected ? (
-          <div className="mt-3 p-3 bg-[#FFF5F3] rounded-xl">
-            <p className="text-xs text-[#FF6B4A] font-['Manrope',sans-serif]">
-              ✨ Highlighted areas show detected{" "}
-              {selectedOption?.label.toLowerCase()} on your face.
-            </p>
-          </div>
-        ) : (
-          <div className="mt-3 p-3 bg-[#EFF6FF] rounded-xl border border-[#BFDBFE]">
-            <p className="text-xs text-[#1D4ED8] font-['Manrope',sans-serif]">
-              ✅ No visible concerns were detected for{" "}
-              {selectedOption?.label.toLowerCase()} in your latest analysis.
-            </p>
-          </div>
-        )
       )}
+
+      {/* METRIC SELECTOR */}
+      <div className="pt-1">
+        <div className="flex justify-center gap-2 mb-2">
+          {firstRow.map((option) => {
+            const active = selectedMetric === option.value;
+            return (
+              <button
+                key={option.value}
+                onClick={() => setSelectedMetric(option.value)}
+                className={`px-4 py-2 rounded-full text-xs font-['Manrope',sans-serif] transition-all ${
+                  active
+                    ? "bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] text-white shadow-md"
+                    : "bg-white border border-[#E5E5E5] text-[#6B7280] hover:border-[#FF6B4A] hover:text-[#FF6B4A]"
+                }`}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex justify-center gap-2">
+          {secondRow.map((option) => {
+            const active = selectedMetric === option.value;
+            return (
+              <button
+                key={option.value}
+                onClick={() => setSelectedMetric(option.value)}
+                className={`px-4 py-2 rounded-full text-xs font-['Manrope',sans-serif] transition-all ${
+                  active
+                    ? "bg-gradient-to-r from-[#FF6B4A] to-[#FFA94D] text-white shadow-md"
+                    : "bg-white border border-[#E5E5E5] text-[#6B7280] hover:border-[#FF6B4A] hover:text-[#FF6B4A]"
+                }`}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

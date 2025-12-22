@@ -17,6 +17,7 @@ type MetricHighlight =
   | "lines";
 
 // Offset global para TODAS las máscaras de Haut (en %)
+// (En acne/pores/sagging/lines/redness/dark_circles NO aplicamos offset)
 const HAUT_MASK_OFFSET = {
   xPercent: -1.5,
   yPercent: -1.0,
@@ -26,22 +27,300 @@ interface MetricDetailModalProps {
   metric: SkinMetric | null;
   onClose: () => void;
   imageUrl: string;
+
   // Imagen de cara generada por Haut (anonymised / aligned_face)
   hautFaceImageUrl?: string;
-  // Máscara de líneas de Haut
+
+  // Masks legacy (fallbacks)
   hautLinesMaskUrl?: string;
-  // Máscara de poros de Haut
   hautPoresMaskUrl?: string;
-  // Máscara de pigmentación de Haut
   hautPigmentationMaskUrl?: string;
-  // Máscara de acné (breakouts) de Haut
   hautAcneMaskUrl?: string;
-  // Máscara de redness de Haut
   hautRednessMaskUrl?: string;
-  // Máscara de sagging de Haut
   hautSaggingMaskUrl?: string;
-  // Máscara de dark circles de Haut
   hautDarkCirclesMaskUrl?: string;
+}
+
+const pickFirst = (...vals: any[]) => vals.find((v) => v !== undefined && v !== null);
+
+const toNumberOrUndefined = (v: any) => {
+  const n = typeof v === "string" ? Number(v) : v;
+  return typeof n === "number" && !Number.isNaN(n) ? n : undefined;
+};
+
+const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
+
+// ✅ percent formatter: mantiene 0% si v=0 (no lo convierte en undefined)
+const formatPercent = (v: any) => {
+  const n = toNumberOrUndefined(v);
+  if (n === undefined) return undefined;
+  if (n > 0 && n <= 1) return `${Math.round(n * 100)}%`;
+  return `${Math.round(n)}%`;
+};
+
+// ✅ per-mille formatter: mantiene 0 ‰ si v=0
+const formatPerMilleOrPercent = (v: any) => {
+  const n = toNumberOrUndefined(v);
+  if (n === undefined) return undefined;
+  if (n > 0 && n <= 1) return `${Math.round(n * 100)}%`;
+  return `${Math.round(n)} ‰`;
+};
+
+const formatScore = (v: any) => {
+  const n = toNumberOrUndefined(v);
+  if (n === undefined) return undefined;
+  return `${Math.round(clamp(n, 0, 100))}`;
+};
+
+const formatGrade = (v: any) => {
+  const n = toNumberOrUndefined(v);
+  if (n === undefined) return undefined;
+  return `${Math.round(clamp(n, 0, 5))}/5`;
+};
+
+const formatNumber = (v: any) => {
+  const n = toNumberOrUndefined(v);
+  if (n === undefined) return undefined;
+  return `${Math.round(n)}`;
+};
+
+// ✅ Helper: suma amount dentro de areas.{zone}.amount
+function sumAreasAmount(areas: any): number | undefined {
+  if (!areas || typeof areas !== "object") return undefined;
+
+  const values = Object.values(areas)
+    .map((a: any) => a?.amount)
+    .filter((v) => typeof v === "number" && !Number.isNaN(v));
+
+  if (values.length === 0) return undefined;
+  return values.reduce((acc, v) => acc + v, 0);
+}
+
+// Busca fallback dentro de metric.biomarkers por texto
+function findFromBiomarkers(biomarkers: any[] | undefined, contains: string[]) {
+  if (!biomarkers || biomarkers.length === 0) return undefined;
+  const needles = contains.map((s) => s.toLowerCase());
+  const hit = biomarkers.find((b) => {
+    const label = String(b?.label ?? "").toLowerCase();
+    return needles.some((x) => label.includes(x));
+  });
+  return hit?.value;
+}
+
+// Highlight type ultra-safe
+function getMetricHighlightSafe(metricName: any): MetricHighlight | null {
+  const name = String(metricName ?? "").toLowerCase();
+  if (!name) return null;
+  if (name.includes("acne") || name.includes("breakout")) return "acne";
+  if (name.includes("pore")) return "pores";
+  if (name.includes("pigment")) return "pigmentation";
+  if (name.includes("redness") || name.includes("erythema")) return "redness";
+  if (name.includes("sagging")) return "sagging";
+  if (name.includes("dark circle")) return "dark_circles";
+  if (name.includes("line") || name.includes("wrinkle")) return "lines";
+  return null;
+}
+
+// ✅ Descriptions
+function getAcneDescriptionFromScore(scoreAny: any) {
+  const s = toNumberOrUndefined(scoreAny);
+  const score = typeof s === "number" ? Math.round(clamp(s, 0, 100)) : undefined;
+  if (score === undefined) return "";
+  if (score >= 90) return "Clear skin with minimal to no visible breakouts; indicates excellent skin condition";
+  if (score >= 80) return "Mild breakout presence, limited to isolated pimples and some inflammation; overall skin remains in good condition";
+  if (score >= 50) return "Moderate breakout activity with a combination of inflammatory areas and pimples";
+  if (score >= 30) return "Prominent breakout presence, including multiple inflamed areas and widespread pimples";
+  return "Severe breakout condition with high inflammation and pimples";
+}
+
+function getPoresDescriptionFromScore(scoreAny: any) {
+  const s = toNumberOrUndefined(scoreAny);
+  const score = typeof s === "number" ? Math.round(clamp(s, 0, 100)) : undefined;
+  if (score === undefined) return "";
+  if (score >= 90) return "No visible pores";
+  if (score >= 80) return "Minimal visible pores";
+  if (score >= 50) return "Moderate visible pores";
+  if (score >= 30) return "Numerous enlarged pores";
+  return "Extensive enlarged pores";
+}
+
+function getRednessDescriptionFromScore(scoreAny: any) {
+  const s = toNumberOrUndefined(scoreAny);
+  const score = typeof s === "number" ? Math.round(clamp(s, 0, 100)) : undefined;
+  if (score === undefined) return "";
+  if (score >= 90) return "Minimal redness, barely noticeable pink tint";
+  if (score >= 80) return "Light pink areas or mild flushing";
+  if (score >= 50) return "Moderate redness with visible blood vessels";
+  if (score >= 30) return "Significant redness with inflammation";
+  return "Severe redness with pronounced inflammation";
+}
+
+function getSaggingDescriptionFromScore(scoreAny: any) {
+  const s = toNumberOrUndefined(scoreAny);
+  const score = typeof s === "number" ? Math.round(clamp(s, 0, 100)) : undefined;
+  if (score === undefined) return "";
+  if (score >= 90) return "No visible skin sagging";
+  if (score >= 80) return "Mild sagging in nasolabial area or marionette lines";
+  if (score >= 50) return "Moderate sagging in the cheeks or jawline with visible softening of facial contours";
+  if (score >= 30) return "Pronounced sagging with deep folds and noticeable loss of definition in facial structure";
+  return "Severe sagging with significant drooping, jowls, and extensive volume loss";
+}
+
+function getLinesDescriptionFromScore(scoreAny: any) {
+  const s = toNumberOrUndefined(scoreAny);
+  const score = typeof s === "number" ? Math.round(clamp(s, 0, 100)) : undefined;
+  if (score === undefined) return "";
+  if (score >= 90) return "Subtle signs of fine lines";
+  if (score >= 80) return "Multiple fine lines or a few deep lines";
+  if (score >= 50) return "Presence of both deep and fine lines";
+  if (score >= 30) return "Presence of severe deep lines";
+  return "Presence of severe deep lines";
+}
+
+// Biomarkers por métrica
+function getBiomarkersForMetric(
+  type: MetricHighlight | null,
+  raw: any,
+  biomarkers: any[] | undefined
+): Array<{ label: string; value: string }> {
+  if (!type) return [];
+  const out: Array<{ label: string; value: string }> = [];
+  const push = (label: string, value?: string) => out.push({ label, value: value ?? "—" });
+
+  if (type === "acne") {
+    const densityRaw = pickFirst(
+      raw?.inflammation?.density,
+      raw?.acne_inflammation?.density,
+      raw?.breakouts?.inflammation?.density,
+      raw?.breakouts?.acne_inflammation?.density,
+      raw?.density
+    );
+    const densityFallback = findFromBiomarkers(biomarkers, ["density", "inflammation"]);
+    const density = formatPerMilleOrPercent(densityRaw ?? densityFallback);
+
+    const pimplesRaw = pickFirst(
+      raw?.pimples?.amount,
+      raw?.pimples?.count,
+      raw?.pimples_count,
+      raw?.pimples_number,
+      raw?.lesions_count,
+      raw?.breakouts?.pimples?.amount,
+      raw?.breakouts?.pimples?.count,
+      raw?.breakouts?.pimples_count
+    );
+    const pimplesFallback = findFromBiomarkers(biomarkers, [
+      "number of pimples",
+      "pimples",
+      "pimple",
+      "lesion",
+      "breakout",
+    ]);
+    const pimples = formatNumber(pimplesRaw ?? pimplesFallback);
+
+    push("Density", density);
+    push("Number of pimples", pimples);
+    return out;
+  }
+
+  if (type === "redness") {
+    const irritationRaw = pickFirst(
+      raw?.irritation?.score,
+      raw?.irritation_score,
+      raw?.redness?.irritation?.score,
+      raw?.erythema?.score
+    );
+    const irritationFallback = findFromBiomarkers(biomarkers, ["irritation", "redness", "erythema"]);
+    const irritation = formatScore(irritationRaw ?? irritationFallback);
+    push("Irritation", irritation);
+    return out;
+  }
+
+  if (type === "pores") {
+    const poresAmountRaw = pickFirst(
+      raw?.amount,
+      raw?.pores_amount,
+      raw?.pores?.amount,
+      sumAreasAmount(raw?.areas),
+      raw?.pores_count,
+      raw?.number_of_pores
+    );
+    const poresAmountFallback = findFromBiomarkers(biomarkers, [
+      "number of pores",
+      "pores amount",
+      "pores count",
+      "pores",
+    ]);
+    const poresCount = formatNumber(poresAmountRaw ?? poresAmountFallback);
+
+    const enlargedAmountRaw = pickFirst(
+      raw?.enlarged_pores?.amount,
+      raw?.enlarged_pores_amount,
+      raw?.enlarged_pores?.count,
+      sumAreasAmount(raw?.enlarged_pores?.areas),
+      raw?.enlarged_pores_count,
+      raw?.pores?.enlarged_count,
+      raw?.pores?.enlarged?.count
+    );
+    const enlargedFallback = findFromBiomarkers(biomarkers, [
+      "enlarged pores",
+      "enlarged",
+      "large pores",
+    ]);
+    const enlarged = formatNumber(enlargedAmountRaw ?? enlargedFallback);
+
+    push("Number of pores", poresCount);
+    push("Enlarged pores", enlarged);
+    return out;
+  }
+
+  if (type === "sagging") {
+    const jowlsRaw = pickFirst(raw?.jowls?.grade, raw?.jowls_grade, raw?.sagging?.jowls?.grade);
+    const jowlsFallback = findFromBiomarkers(biomarkers, ["jowls"]);
+    const jowls = formatGrade(jowlsRaw ?? jowlsFallback);
+
+    const lacrimalRaw = pickFirst(
+      raw?.lacrimal_grooves?.score,
+      raw?.lacrimal_grooves_score,
+      raw?.sagging?.lacrimal_grooves?.score,
+      raw?.tear_trough?.score,
+      raw?.tear_troughs?.score
+    );
+    const lacrimalFallback = findFromBiomarkers(biomarkers, ["lacrimal", "groove", "tear trough"]);
+    const lacrimal = formatScore(lacrimalRaw ?? lacrimalFallback);
+
+    push("Jowls", jowls);
+    push("Lacrimal grooves", lacrimal);
+    return out;
+  }
+
+  if (type === "lines") {
+    const deepRaw = pickFirst(
+      raw?.deep_lines?.score,
+      raw?.deep_lines_score,
+      raw?.wrinkles?.deep?.score,
+      raw?.lines?.deep?.score,
+      raw?.deep_wrinkles?.score
+    );
+    const deepFallback = findFromBiomarkers(biomarkers, ["deep line", "deep wrinkle"]);
+    const deep = formatScore(deepRaw ?? deepFallback);
+
+    const fineRaw = pickFirst(
+      raw?.fine_lines?.score,
+      raw?.fine_lines_score,
+      raw?.wrinkles?.fine?.score,
+      raw?.lines?.fine?.score,
+      raw?.fine_wrinkles?.score
+    );
+    const fineFallback = findFromBiomarkers(biomarkers, ["fine line", "fine wrinkle"]);
+    const fine = formatScore(fineRaw ?? fineFallback);
+
+    push("Deep lines", deep);
+    push("Fine lines", fine);
+    return out;
+  }
+
+  // dark_circles: por ahora sin biomarkers (como lo tenías)
+  return out;
 }
 
 export function MetricDetailModal({
@@ -59,26 +338,10 @@ export function MetricDetailModal({
 }: MetricDetailModalProps) {
   if (!metric) return null;
 
-    // TEMP: debug de Acne para ver el raw de Haut
-    if (metric.name.toLowerCase().includes("acne")) {
-      // 👇 Esto es lo que necesitamos ver
-      console.log("[Bloom DEBUG] ACNE metric.raw:", metric.raw);
-    }
+  const metricName = String((metric as any)?.name ?? "");
+  const metricStatus = String((metric as any)?.status ?? "");
+  const highlightType = getMetricHighlightSafe(metricName);
 
-  // Map metric names to highlight types
-  const getMetricHighlight = (metricName: string): MetricHighlight | null => {
-    const name = metricName.toLowerCase();
-    if (name.includes("acne") || name.includes("breakout")) return "acne";
-    if (name.includes("pore")) return "pores";
-    if (name.includes("pigment")) return "pigmentation";
-    if (name.includes("redness") || name.includes("erythema")) return "redness";
-    if (name.includes("sagging")) return "sagging";
-    if (name.includes("dark circle")) return "dark_circles";
-    if (name.includes("line") || name.includes("wrinkle")) return "lines";
-    return null;
-  };
-
-  const highlightType = getMetricHighlight(metric.name);
   const isLinesMetric = highlightType === "lines";
   const isPoresMetric = highlightType === "pores";
   const isPigmentationMetric = highlightType === "pigmentation";
@@ -87,42 +350,99 @@ export function MetricDetailModal({
   const isSaggingMetric = highlightType === "sagging";
   const isDarkCirclesMetric = highlightType === "dark_circles";
 
-  // 👉 Detectar si realmente hay "daño" o no en esta métrica
   const hasDamage = (() => {
     const score =
-      typeof metric.score === "number" && !Number.isNaN(metric.score)
-        ? metric.score
+      typeof (metric as any)?.score === "number" && !Number.isNaN((metric as any).score)
+        ? (metric as any).score
         : 0;
 
-    const status = (metric.status || "").toString().toLowerCase();
+    const status = metricStatus.toLowerCase();
     const looksHealthy =
       status.includes("good") ||
       status.includes("healthy") ||
       status.includes("normal") ||
-      status.includes("low");
+      status.includes("low") ||
+      status.includes("excellent") ||
+      status.includes("great");
 
-    // Si el status es claramente sano y el score es alto, consideramos que NO hay daño
     if (looksHealthy && score >= 85) return false;
-
-    // Si el score es muy alto, también asumimos que no hay daño
     if (score >= 95) return false;
-
-    // En el resto de casos, asumimos que sí hay daño
     return true;
   })();
 
-  // ¿Tenemos máscara real para esta métrica?
-  const hasRealMask =
-    (isLinesMetric && !!hautLinesMaskUrl) ||
-    (isPoresMetric && !!hautPoresMaskUrl) ||
-    (isPigmentationMetric && !!hautPigmentationMaskUrl) ||
-    (isAcneMetric && !!hautAcneMaskUrl) ||
-    (isRednessMetric && !!hautRednessMaskUrl) ||
-    (isSaggingMetric && !!hautSaggingMaskUrl) ||
-    (isDarkCirclesMetric && !!hautDarkCirclesMaskUrl);
+  // ✅ Fuente única de verdad:
+  const resolvedMaskUrl: string | undefined =
+    (metric as any)?.maskUrl ||
+    (isPoresMetric ? hautPoresMaskUrl : undefined) ||
+    (isLinesMetric ? hautLinesMaskUrl : undefined) ||
+    (isPigmentationMetric ? hautPigmentationMaskUrl : undefined) ||
+    (isAcneMetric ? hautAcneMaskUrl : undefined) ||
+    (isRednessMetric ? hautRednessMaskUrl : undefined) ||
+    (isSaggingMetric ? hautSaggingMaskUrl : undefined) ||
+    (isDarkCirclesMetric ? hautDarkCirclesMaskUrl : undefined);
 
-  // ✅ Siempre misma foto base (alineada si existe)
-  const basePhoto = hautFaceImageUrl || imageUrl;
+  const hasRealMask = !!resolvedMaskUrl;
+
+  // ✅ Si hay máscara, basePhoto debe ser aligned_face/anonymised para 1:1
+  const basePhoto = (hasRealMask ? hautFaceImageUrl : undefined) || hautFaceImageUrl || imageUrl;
+
+  const raw = (metric as any)?.raw ?? {};
+  const biomarkerCards = getBiomarkersForMetric(highlightType, raw, (metric as any)?.biomarkers);
+
+  const computedDescription =
+    highlightType === "acne"
+      ? getAcneDescriptionFromScore((metric as any)?.score)
+      : highlightType === "pores"
+      ? getPoresDescriptionFromScore((metric as any)?.score)
+      : highlightType === "redness"
+      ? getRednessDescriptionFromScore((metric as any)?.score)
+      : highlightType === "sagging"
+      ? getSaggingDescriptionFromScore((metric as any)?.score)
+      : highlightType === "lines"
+      ? getLinesDescriptionFromScore((metric as any)?.score)
+      : highlightType === "pigmentation"
+      ? String(raw?.score_description ?? (metric as any)?.description ?? "")
+      : String((metric as any)?.description ?? "");
+
+  // ✅ 1:1 (SIN offset) para métricas que ya van perfectas con aligned_face
+  const disableOffsetForMask =
+    isAcneMetric ||
+    isPoresMetric ||
+    isSaggingMetric ||
+    isLinesMetric ||
+    isRednessMetric ||
+    isDarkCirclesMetric; // ✅ añadido
+
+  // ✅ Opacity / filter (lines se mantiene como lo dejamos perfecto)
+  const overlayOpacity = isLinesMetric
+    ? 0.75
+    : isRednessMetric
+    ? 0.65
+    : isPigmentationMetric
+    ? 0.8
+    : isPoresMetric
+    ? 0.75
+    : isDarkCirclesMetric
+    ? 0.75
+    : isSaggingMetric
+    ? 0.7
+    : 0.7;
+
+  const overlayFilter = isLinesMetric
+    ? "brightness(1.15) contrast(1.55) saturate(1.75) drop-shadow(0 0 6px rgba(236,72,153,0.65)) drop-shadow(0 0 12px rgba(236,72,153,0.35))"
+    : isPoresMetric
+    ? "brightness(1.05) contrast(1.15) saturate(1.15) blur(0.4px)"
+    : isPigmentationMetric
+    ? "brightness(1.05) contrast(1.15) saturate(1.2)"
+    : isAcneMetric
+    ? "brightness(1.05) contrast(1.1) saturate(1.1)"
+    : isRednessMetric
+    ? "brightness(1.0) contrast(1.15) saturate(1.1)"
+    : isSaggingMetric
+    ? "brightness(1.0) contrast(1.15) saturate(1.05)"
+    : isDarkCirclesMetric
+    ? "brightness(1.05) contrast(1.2) saturate(1.15)"
+    : "brightness(1.05) contrast(1.1) saturate(1.1)";
 
   return (
     <div
@@ -134,337 +454,148 @@ export function MetricDetailModal({
         style={{ maxHeight: "92vh" }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Columna izquierda: foto */}
+        {/* Columna izquierda */}
         <div className="flex justify-center sm:justify-start sm:w-[46%]">
           {basePhoto && (
-            <div
-              className="relative rounded-3xl overflow-hidden border border-[#E5E5E5] bg-[#F5F5F5] w-full"
-              style={{
-                maxWidth: "420px",
-                aspectRatio: "4 / 5",
-              }}
-            >
-              {/* Cara base */}
-              <img
-                src={basePhoto}
-                alt="Skin Analysis"
-                className="w-full h-full object-contain"
-                style={{ background: "#F5F5F5" }}
-              />
-
-              {/* Lines */}
-              {isLinesMetric && hautLinesMaskUrl && hasDamage && (
+            <div className="w-full" style={{ maxWidth: "420px" }}>
+              <div
+                className="relative rounded-3xl overflow-hidden border border-[#E5E5E5] bg-[#F5F5F5] w-full"
+                style={{ aspectRatio: "4 / 5" }}
+              >
                 <img
-                  src={hautLinesMaskUrl}
-                  alt="Lines overlay"
-                  className="absolute inset-0 w-full h-full object-contain pointer-events-none mix-blend-screen opacity-35"
+                  src={basePhoto}
+                  alt="Skin Analysis"
+                  className="w-full h-full"
                   style={{
-                    transform: `translate(${HAUT_MASK_OFFSET.xPercent}%, ${HAUT_MASK_OFFSET.yPercent}%)`,
-                    transformOrigin: "center center",
-                    filter:
-                      "brightness(0.9) contrast(1.15) saturate(1.2) blur(0.5px)",
+                    background: "#F5F5F5",
+                    objectFit: hasRealMask ? "cover" : "contain",
                   }}
+                  draggable={false}
                 />
-              )}
 
-              {/* Pores */}
-              {isPoresMetric && hautPoresMaskUrl && hasDamage && (
-                <img
-                  src={hautPoresMaskUrl}
-                  alt="Pores overlay"
-                  className="absolute inset-0 w-full h-full object-contain pointer-events-none mix-blend-screen opacity-40"
-                  style={{
-                    transform: `translate(${HAUT_MASK_OFFSET.xPercent}%, ${HAUT_MASK_OFFSET.yPercent}%)`,
-                    transformOrigin: "center center",
-                    filter:
-                      "brightness(0.95) contrast(1.1) saturate(1.1) blur(0.4px)",
-                  }}
-                />
-              )}
-
-              {/* Pigmentation */}
-              {isPigmentationMetric &&
-                hautPigmentationMaskUrl &&
-                hasDamage && (
+                {resolvedMaskUrl && hasDamage && (
                   <img
-                    src={hautPigmentationMaskUrl}
-                    alt="Pigmentation overlay"
-                    className="absolute inset-0 w-full h-full object-contain pointer-events-none mix-blend-screen opacity-80"
+                    src={resolvedMaskUrl}
+                    alt={`${metricName} overlay`}
+                    className="absolute inset-0 w-full h-full pointer-events-none mix-blend-screen"
                     style={{
-                      transform: `translate(${HAUT_MASK_OFFSET.xPercent}%, ${HAUT_MASK_OFFSET.yPercent}%)`,
+                      objectFit: "cover",
+                      transform: disableOffsetForMask
+                        ? "translate(0%, 0%)"
+                        : `translate(${HAUT_MASK_OFFSET.xPercent}%, ${HAUT_MASK_OFFSET.yPercent}%)`,
                       transformOrigin: "center center",
-                      filter:
-                        "brightness(1.05) contrast(1.15) saturate(1.2)",
+                      opacity: overlayOpacity,
+                      filter: overlayFilter,
                     }}
+                    draggable={false}
                   />
                 )}
+              </div>
 
-              {/* Acne / Breakouts */}
-              {isAcneMetric && hautAcneMaskUrl && hasDamage && (
-                <img
-                  src={hautAcneMaskUrl}
-                  alt="Acne overlay"
-                  className="absolute inset-0 w-full h-full object-contain pointer-events-none mix-blend-screen opacity-70"
-                  style={{
-                    transform: `translate(${HAUT_MASK_OFFSET.xPercent}%, ${HAUT_MASK_OFFSET.yPercent}%)`,
-                    transformOrigin: "center center",
-                    filter:
-                      "brightness(1.05) contrast(1.1) saturate(1.1)",
-                  }}
-                />
+              {!hasRealMask && (
+                <p className="mt-1 text-center text-[7px] leading-[9px] text-[#9CA3AF] font-['Manrope',sans-serif]">
+                  No visible concerns were detected in this area during the analysis
+                </p>
               )}
-
-              {/* Redness */}
-              {isRednessMetric && hautRednessMaskUrl && hasDamage && (
-                <img
-                  src={hautRednessMaskUrl}
-                  alt="Redness overlay"
-                  className="absolute inset-0 w-full h-full object-contain pointer-events-none mix-blend-screen opacity-65"
-                  style={{
-                    transform: `translate(${HAUT_MASK_OFFSET.xPercent}%, ${HAUT_MASK_OFFSET.yPercent}%)`,
-                    transformOrigin: "center center",
-                    filter:
-                      "brightness(1.0) contrast(1.15) saturate(1.1)",
-                  }}
-                />
-              )}
-
-              {/* Sagging */}
-              {isSaggingMetric && hautSaggingMaskUrl && hasDamage && (
-                <img
-                  src={hautSaggingMaskUrl}
-                  alt="Sagging overlay"
-                  className="absolute inset-0 w-full h-full object-contain pointer-events-none mix-blend-screen opacity-70"
-                  style={{
-                    transform: `translate(${HAUT_MASK_OFFSET.xPercent}%, ${HAUT_MASK_OFFSET.yPercent}%)`,
-                    transformOrigin: "center center",
-                    filter:
-                      "brightness(1.0) contrast(1.15) saturate(1.05)",
-                  }}
-                />
-              )}
-
-              {/* Dark Circles */}
-              {isDarkCirclesMetric &&
-                hautDarkCirclesMaskUrl &&
-                hasDamage && (
-                  <img
-                    src={hautDarkCirclesMaskUrl}
-                    alt="Dark circles overlay"
-                    className="absolute inset-0 w-full h-full object-contain pointer-events-none mix-blend-screen opacity-75"
-                    style={{
-                      transform: `translate(${HAUT_MASK_OFFSET.xPercent}%, ${HAUT_MASK_OFFSET.yPercent}%)`,
-                      transformOrigin: "center center",
-                      filter:
-                        "brightness(1.05) contrast(1.2) saturate(1.15)",
-                    }}
-                  />
-                )}
-              {/* ❌ No hay overlays fake, solo máscaras reales si existen */}
             </div>
           )}
         </div>
 
-        {/* Columna derecha: info */}
-        <div className="flex-1 flex flex-col gap-5 sm:pr-2">
-          {/* Header: título + score + close */}
-          <div className="flex items-start justify-between gap-4">
-            <div>
+        {/* Columna derecha */}
+        <div className="flex-1 flex flex-col sm:pr-2">
+          <div className="flex items-start justify-between gap-4 mb-4">
+            <div className="flex-1">
               <h2
-                className="text-[#18212D] font-['Manrope',sans-serif]"
-                style={{ fontSize: "26px", lineHeight: "32px" }}
+                className="text-[#18212D] font-['Manrope',sans-serif] mb-3"
+                style={{ fontSize: "28px", lineHeight: "34px" }}
               >
-                {metric.name}
+                {metricName || "Metric"}
               </h2>
-            </div>
 
-            <div className="flex items-start gap-4">
-              {/* Score */}
-              <div className="text-right">
+              <div className="flex items-center gap-4">
+                <div className="flex items-baseline gap-2">
+                  <div
+                    className="font-['Manrope',sans-serif]"
+                    style={{
+                      fontSize: "32px",
+                      lineHeight: "36px",
+                      color: getScoreColor((metric as any)?.score),
+                      fontWeight: 600,
+                    }}
+                  >
+                    {(metric as any)?.score ?? "—"}
+                  </div>
+                  <div className="text-[11px] text-[#9CA3AF] font-['Manrope',sans-serif]">
+                    / 100
+                  </div>
+                </div>
+
                 <div
-                  className="font-['Manrope',sans-serif]"
-                  style={{
-                    fontSize: "28px",
-                    lineHeight: "32px",
-                    color: getScoreColor(metric.score),
-                  }}
+                  className={`inline-flex items-center px-3 py-1.5 rounded-full border text-xs font-['Manrope',sans-serif] ${getStatusBadge(
+                    metricStatus
+                  )}`}
                 >
-                  {metric.score}
-                </div>
-                <div className="text-[11px] text-[#9CA3AF] font-['Manrope',sans-serif]">
-                  / 100
+                  {metricStatus || "—"}
                 </div>
               </div>
-
-              {/* Botón cerrar */}
-              <button
-                onClick={onClose}
-                className="text-[#6B7280] hover:text-[#18212D] ml-1"
-              >
-                <X className="w-5 h-5" />
-              </button>
             </div>
-          </div>
 
-          {/* Status Badge */}
-          <div className="flex items-center gap-3">
-            <div
-              className={`inline-flex items-center px-3 py-1.5 rounded-full border text-xs font-['Manrope',sans-serif] ${getStatusBadge(
-                metric.status
-              )}`}
+            <button
+              onClick={onClose}
+              className="text-[#6B7280] hover:text-[#18212D] transition-colors"
             >
-              {metric.status}
-            </div>
+              <X className="w-6 h-6" />
+            </button>
           </div>
 
-          {/* Descripción */}
-          <p className="text-[#6B7280] font-['Manrope',sans-serif] text-sm">
-            {metric.description}
-          </p>
+          <div className="h-px bg-[#E5E5E5] mb-5"></div>
 
-          {/* Nota bajo la imagen / estado de la métrica */}
-          {hasDamage ? (
-            hasRealMask ? (
-              <div className="mt-1 p-3 bg-[#FFF5F3] rounded-xl">
-                <p className="text-xs text-[#FF6B4A] font-['Manrope',sans-serif] text-center">
-                  ✨ Highlighted areas show detected{" "}
-                  {metric.name.toLowerCase()}.
-                </p>
-              </div>
-            ) : (
-              <div className="mt-1 p-3 bg-[#FFF5F3] rounded-xl">
-                <p className="text-xs text-[#FF6B4A] font-['Manrope',sans-serif] text-center">
-                  ✨ We detected some concerns related to{" "}
-                  {metric.name.toLowerCase()} in this analysis, even if no
-                  highlight overlay is shown.
-                </p>
-              </div>
-            )
-          ) : (
-            <div className="mt-1 p-3 bg-[#EFF6FF] rounded-xl border border-[#BFDBFE]">
-              <p className="text-xs text-[#1D4ED8] font-['Manrope',sans-serif] text-center">
-                ✅ No visible concerns were detected for{" "}
-                {metric.name.toLowerCase()} in your latest analysis.
-              </p>
-            </div>
-          )}
+          <div className="mb-6">
+            <p className="text-[#6B7280] font-['Manrope',sans-serif] text-[15px] leading-relaxed">
+              {computedDescription}
+            </p>
+          </div>
 
-          {/* Biomarkers */}
-          {metric.name.toLowerCase().includes("acne") ? (
-            <div className="mt-2">
+          {biomarkerCards.length > 0 && (
+            <div className="mb-6">
               <h3
-                className="text-[#18212D] mb-3 font-['Manrope',sans-serif]"
-                style={{ fontSize: "18px" }}
+                className="text-[#18212D] mb-4 font-['Manrope',sans-serif]"
+                style={{ fontSize: "18px", fontWeight: 500 }}
               >
                 Key Biomarkers
               </h3>
 
-              {(() => {
-                const acneRaw: any = metric.raw ?? {};
-
-                // Intentamos varios nombres posibles para el número de granos
-                const pimplesCountRaw =
-                  acneRaw?.pimples?.count ??
-                  acneRaw?.pimples_count ??
-                  acneRaw?.pimples_number ??
-                  acneRaw?.lesions_count ??
-                  acneRaw?.inflamed_regions ??
-                  undefined;
-
-                const pimplesCount =
-                  pimplesCountRaw !== undefined
-                    ? pimplesCountRaw
-                    : metric.biomarkers?.[0]?.value ?? "—";
-
-                // Intentamos varios nombres posibles para la densidad / inflamación
-                const densityRaw =
-                  acneRaw?.pimples?.density ??
-                  acneRaw?.acne_inflammation?.density ??
-                  acneRaw?.density ??
-                  undefined;
-
-                let densityDisplay: string;
-                if (typeof densityRaw === "number") {
-                  densityDisplay = `${Math.round(densityRaw)}‰`;
-                } else if (metric.biomarkers?.[1]?.value != null) {
-                  densityDisplay = String(metric.biomarkers[1].value);
-                } else {
-                  densityDisplay = "—";
-                }
-
-                return (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {/* Number of pimples */}
-                    <div className="bg-white rounded-2xl border border-[#E5E5E5] p-4 shadow-sm">
-                      <div className="text-xs text-[#9CA3AF] mb-1 font-['Manrope',sans-serif]">
-                        Number of pimples
-                      </div>
-                      <div
-                        className="text-[#18212D] font-['Manrope',sans-serif]"
-                        style={{ fontSize: "18px", fontWeight: 600 }}
-                      >
-                        {pimplesCount}
-                      </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {biomarkerCards.map((b, idx) => (
+                  <div
+                    key={idx}
+                    className="bg-[#FAFAFA] rounded-2xl border border-[#E5E5E5] p-4 shadow-sm hover:shadow-md transition-all"
+                  >
+                    <div className="text-[11px] text-[#9CA3AF] mb-2 font-['Manrope',sans-serif] uppercase tracking-wide">
+                      {b.label}
                     </div>
-
-                    {/* Density / Acne inflammation */}
-                    <div className="bg-white rounded-2xl border border-[#E5E5E5] p-4 shadow-sm">
-                      <div className="text-xs text-[#9CA3AF] mb-1 font-['Manrope',sans-serif]">
-                        Acne inflammation (density)
-                      </div>
-                      <div
-                        className="text-[#18212D] font-['Manrope',sans-serif]"
-                        style={{ fontSize: "18px", fontWeight: 600 }}
-                      >
-                        {densityDisplay}
-                      </div>
+                    <div
+                      className="text-[#18212D] font-['Manrope',sans-serif]"
+                      style={{ fontSize: "22px", fontWeight: 600 }}
+                    >
+                      {b.value}
                     </div>
                   </div>
-                );
-              })()}
-            </div>
-          ) : (
-            metric.biomarkers &&
-            metric.biomarkers.length > 0 && (
-              <div className="mt-2">
-                <h3
-                  className="text-[#18212D] mb-3 font-['Manrope',sans-serif]"
-                  style={{ fontSize: "18px" }}
-                >
-                  Key Biomarkers
-                </h3>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {metric.biomarkers.map((bio, idx) => (
-                    <div
-                      key={idx}
-                      className="bg-white rounded-2xl border border-[#E5E5E5] p-4 shadow-sm hover:shadow-md transition-all"
-                    >
-                      <div className="text-xs text-[#9CA3AF] mb-1 font-['Manrope',sans-serif]">
-                        {bio.label}
-                      </div>
-                      <div
-                        className="text-[#18212D] font-['Manrope',sans-serif]"
-                        style={{ fontSize: "18px", fontWeight: 600 }}
-                      >
-                        {bio.value}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                ))}
               </div>
-            )
+            </div>
           )}
 
-          {/* Recommendation */}
-          <div className="bg-[#F5F5F5] rounded-xl p-4 mt-2">
-            <div className="text-[#18212D] mb-2 font-['Manrope',sans-serif] text-sm">
+          <div className="mt-1">
+            <div className="text-[#18212D] mb-2 font-['Manrope',sans-serif] text-[15px] font-medium">
               Recommendation
             </div>
-            <p className="text-[#6B7280] font-['Manrope',sans-serif] text-sm">
-              {metric.recommendation}
+            <p className="text-[#6B7280] font-['Manrope',sans-serif] text-[14px] leading-relaxed">
+              {(metric as any)?.recommendation ?? ""}
             </p>
           </div>
+
+          <div className="h-2" />
         </div>
       </div>
     </div>
